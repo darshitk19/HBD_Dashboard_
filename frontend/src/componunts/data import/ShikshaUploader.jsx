@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import api from "../../utils/Api";
 
-const CollegeDuniaUploader = () => {
+const ShikshaUploader = () => {
   const [files, setFiles] = useState([]);   
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +29,7 @@ const CollegeDuniaUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_college_dunia_data",
+        "/upload_shiksha_data",
         formData,
         {
           headers: {
@@ -105,4 +105,4 @@ const CollegeDuniaUploader = () => {
   );
 };
 
-export default CollegeDuniaUploader;
+export default ShikshaUploader;

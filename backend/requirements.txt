@@ -14,3 +14,5 @@ chardet
 gunicorn
 sqlalchemy
 pymysql
+celery
+redis

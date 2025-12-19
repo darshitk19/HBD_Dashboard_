@@ -12,18 +12,14 @@ import {
   Typography,
   Collapse,
 } from "@material-tailwind/react";
-import { useMaterialTailwindController } from "../../context";
-import { setOpenSidenav } from "../../context";
+import { useMaterialTailwindController, setOpenSidenav } from "../../context";
 
 export function Sidenav({ brandImg, brandName, routes }) {
   const [controller, dispatch] = useMaterialTailwindController();
   const { sidenavColor, sidenavType, openSidenav } = controller;
 
-  // Define text color based on sidenav type for reuse
-  const textColor = sidenavType === "dark" ? "white" : "blue-gray";
-
-  const [openDropdown, setOpenDropdown] = useState(null);      // second level
-  const [openSubDropdown, setOpenSubDropdown] = useState(null); // third level
+  const [openDropdown, setOpenDropdown] = useState(null);      
+  const [openSubDropdown, setOpenSubDropdown] = useState(null); 
 
   const location = useLocation();
 
@@ -31,6 +27,13 @@ export function Sidenav({ brandImg, brandName, routes }) {
     dark: "bg-gradient-to-br from-gray-800 to-gray-900",
     white: "bg-white shadow-sm",
     transparent: "bg-transparent",
+  };
+
+  // Logic to close sidenav ONLY on mobile/tablet
+  const handleCloseSidenav = () => {
+    if (window.innerWidth < 1280) { // Tailwind's 'xl' breakpoint
+      setOpenSidenav(dispatch, false);
+    }
   };
 
   const toggleDropdown = (name) => {
@@ -45,7 +48,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
     const findActiveDropdown = (pages) => {
       for (const page of pages) {
         if (page.children?.length) {
-          if (page.children.some((child) => location.pathname.startsWith(child.path))) {
+          if (page.children.some((child) => location.pathname.includes(child.path))) {
             return page.name;
           }
           const nested = findActiveDropdown(page.children);
@@ -55,8 +58,10 @@ export function Sidenav({ brandImg, brandName, routes }) {
       return null;
     };
 
-    const activeDropdown = routes.flatMap((r) => r.pages);
-    setOpenDropdown(findActiveDropdown(activeDropdown));
+    routes.forEach((route) => {
+      const activeName = findActiveDropdown(route.pages);
+      if (activeName) setOpenDropdown(activeName);
+    });
   }, [location.pathname, routes]);
 
   const renderMenu = (items, level = 0, layout = "", parentPath = "") => {
@@ -68,43 +73,32 @@ export function Sidenav({ brandImg, brandName, routes }) {
         (isSecondLevel && openDropdown === item.name) ||
         (isThirdLevel && openSubDropdown === item.name);
 
-      const toggle = () => {
+      const toggle = (e) => {
+        e.preventDefault();
         isSecondLevel ? toggleDropdown(item.name) : toggleSubDropdown(item.name);
       };
 
-      // Build full path correctly
       const base = layout ? `/${layout}` : "";
-      const fullPath =level === 0 ? `${base}${item.path || ""}` : `${parentPath}/${item.path || ""}`;
-
+      const fullPath = level === 0 ? `${base}${item.path || ""}` : `${parentPath}/${item.path || ""}`;
       const cleanPath = fullPath.replace(/\/+/g, "/");
 
       return (
-        <li key={item.name} className={`ml-${level * 2}`}>
+        <li key={item.name}>
           {isParent ? (
             <>
               <Button
                 onClick={toggle}
-                variant={isOpen ? "gradient" : "text"}
-                color={
-                  isOpen
-                    ? sidenavColor
-                    : sidenavType === "dark"
-                    ? "white"
-                    : "blue-gray"
-                }
+                variant="text"
+                color={sidenavType === "dark" ? "white" : "blue-gray"}
                 className={`flex items-center gap-4 px-4 capitalize ${level > 0 ? "ml-4" : ""}`}
                 fullWidth
               >
                 {item.icon}
-                <Typography color="inherit" className="font-medium capitalize truncate whitespace-nowrap overflow-hidden">
+                <Typography color="inherit" className="font-medium capitalize truncate">
                   {item.name}
                 </Typography>
                 <span className="ml-auto">
-                  {isOpen ? (
-                    <ChevronUpIcon className="w-4 h-4" />
-                  ) : (
-                    <ChevronDownIcon className="w-4 h-4" />
-                  )}
+                  {isOpen ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
                 </span>
               </Button>
               <Collapse open={isOpen}>
@@ -114,7 +108,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
               </Collapse>
             </>
           ) : (
-            <NavLink to={cleanPath}>
+            <NavLink to={cleanPath} onClick={handleCloseSidenav}>
               {({ isActive }) => (
                 <Button
                   variant={isActive ? "gradient" : "text"}
@@ -147,19 +141,18 @@ export function Sidenav({ brandImg, brandName, routes }) {
         openSidenav ? "translate-x-0" : "-translate-x-80"
       } fixed inset-y-0 left-0 z-50 my-4 ml-4 w-72 rounded-xl transition-transform duration-300 xl:translate-x-0 border border-blue-gray-100 flex flex-col`}
     >
-      {/* Fixed Header with Close Button Fix */}
       <div className="relative flex-shrink-0">
         <Link to="/" className="py-4 px-8 text-center block">
           <Typography
             variant="h6"
-            color={textColor}
+            color={sidenavType === "dark" ? "white" : "blue-gray"}
           >
             {brandName}
           </Typography>
         </Link>
         <IconButton
           variant="text"
-          color={textColor}
+          color={sidenavType === "dark" ? "white" : "blue-gray"}
           size="sm"
           ripple={false}
           className="absolute right-0 top-0 grid rounded-br-none rounded-tl-none xl:hidden"
@@ -169,7 +162,6 @@ export function Sidenav({ brandImg, brandName, routes }) {
         </IconButton>
       </div>
 
-      {/* Scrollable Menu with hidden scrollbar */}
       <div className="flex-1 overflow-y-auto m-4 pr-2 no-scrollbar">
         {routes.map(({ layout, title, pages }, key) => (
           <ul key={key} className="mb-4 flex flex-col gap-1">
@@ -177,7 +169,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
               <li className="mx-3.5 mt-4 mb-2 ">
                 <Typography
                   variant="small"
-                  color={textColor}
+                  color={sidenavType === "dark" ? "white" : "blue-gray"}
                   className="font-black uppercase opacity-75 "
                 >
                   {title}
@@ -192,18 +184,6 @@ export function Sidenav({ brandImg, brandName, routes }) {
   );
 }
 
-Sidenav.defaultProps = {
-  brandImg:
-    "https://cdn.cityhangaround.com/file/cityhangaround/uploads/wYMNRNks5mOFSD2V1eOkZbjeH0m3dhFpyT79tsHW.png",
-  brandName: "Data Management",
-};
-
-Sidenav.propTypes = {
-  brandImg: PropTypes.string,
-  brandName: PropTypes.string,
-  routes: PropTypes.arrayOf(PropTypes.object).isRequired,
-};
-
-Sidenav.displayName = "/src/widgets/layout/sidnave.jsx";
+Sidenav.displayName = "/src/widgets/layout/sidenav.jsx";
 
 export default Sidenav;

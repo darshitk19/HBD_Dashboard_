@@ -223,61 +223,7 @@ export function cities_reports() {
             </div>
           </div>
         <CardHeader floated={false} shadow={false} className="rounded-none p-4  border-b border-gray-200">
-          {/* <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-              <div className="w-full sm:w-72">
-                <Select
-                  label="Select City"
-                  value={selectedCity}
-                  onChange={(val) => setSelectedCity(val)}
-                  className="bg-white"
-                >
-                    <Option value="">All Cities</Option>
-                    {uniqueCities.map((city) => (
-                      <Option key={city} value={city}>
-                        {city}
-                      </Option>
-                    ))}
-                </Select>
-              </div>
-
-              <div className="w-full sm:w-72">
-                <Input
-                  label="Search Category..."
-                  value={categorySearch}
-                  onChange={(e) => setCategorySearch(e.target.value)}
-                  icon={<MagnifyingGlassIcon className="h-5 w-5" />}
-                  className="bg-white"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 items-center text-sm font-medium text-gray-600">
-              <span>
-                Page {currentPage} of {totalPages}
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="text"
-                  className="p-2 rounded-full hover:bg-gray-200"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage((p) => p - 1)}
-                >
-                  <ChevronDownIcon className="h-4 w-4 rotate-90" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="text"
-                  className="p-2 rounded-full hover:bg-gray-200"
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage((p) => p + 1)}
-                >
-                  <ChevronDownIcon className="h-4 w-4 -rotate-90" />
-                </Button>
-              </div>
-            </div>
-          </div> */}
+          
         </CardHeader>
 
         <CardBody className="p-0 overflow-x-auto">

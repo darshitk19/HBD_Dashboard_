@@ -46,7 +46,7 @@ const HeyPlacesUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_HeyPlaces_data",
+        "/hey-places/upload/hey-places-data",
         formData,
         {
           headers: {

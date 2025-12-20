@@ -3,7 +3,7 @@ import api from "../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const PindaUploader = () => {
+const ShikshaUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const PindaUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/pinda/upload/pinda-data",
+        "/shiksha/upload/shiksha-data",
         formData,
         {
           headers: {
@@ -132,4 +132,4 @@ const PindaUploader = () => {
   );
 };
 
-export default PindaUploader;
+export default ShikshaUploader;

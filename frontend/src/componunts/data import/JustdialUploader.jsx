@@ -46,7 +46,7 @@ const JustdialUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Justdial_data",
+        "/justdial/upload/justdial-data",
         formData,
         {
           headers: {

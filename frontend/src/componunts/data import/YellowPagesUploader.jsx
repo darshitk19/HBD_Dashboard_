@@ -46,7 +46,7 @@ const YellowPagesUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_YellowPages_data",
+        "/yellow-pages/upload/yellow-pages-data",
         formData,
         {
           headers: {

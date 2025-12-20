@@ -46,7 +46,7 @@ const NearbuyUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Nearbuy_data",
+        "/near-buy/upload/near-buy-data",
         formData,
         {
           headers: {

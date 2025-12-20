@@ -46,7 +46,7 @@ const ProductDataImport = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Product_data",
+        "/product/upload/product-data",
         formData,
         {
           headers: {

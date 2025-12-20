@@ -46,7 +46,7 @@ const SchoolgisUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Schoolgis_data",
+        "/schoolgis/upload/schoolgis-data",
         formData,
         {
           headers: {

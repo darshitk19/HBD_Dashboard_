@@ -41,7 +41,7 @@ const OthersDataImport = () => {
     try {
       setLoading(true);
       const response = await api.post(
-        "/upload_Others_data",
+        "/others/upload/others-data",
         formData,
         {
           headers: {

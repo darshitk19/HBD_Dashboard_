@@ -46,7 +46,7 @@ const FreelistingUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Freelisting_data",
+        "/freelisting/upload/freelisting-data",
         formData,
         {
           headers: {

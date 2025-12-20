@@ -42,7 +42,7 @@ const convertToCSV = (arr) => {
   return [headers.join(","), ...rows].join("\n");
 };
 
-const GoogleData = () => {
+const HeyPlacesData = () => {
   const [loading, setLoading] = useState(true);
   const [fullData, setFullData] = useState([]);
   const [pageData, setPageData] = useState([]);
@@ -147,7 +147,7 @@ const GoogleData = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <Typography variant="h4" className="pb-2">
-          Google Data
+          HeyPlaces Data
         </Typography>
 
         <div className="flex items-center gap-2">
@@ -258,4 +258,4 @@ const GoogleData = () => {
   );
 };
 
-export default GoogleData;
+export default HeyPlacesData;

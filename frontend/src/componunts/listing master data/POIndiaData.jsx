@@ -42,7 +42,7 @@ const convertToCSV = (arr) => {
   return [headers.join(","), ...rows].join("\n");
 };
 
-const ListingComplete = () => {
+const POIndiaData = () => {
   const [loading, setLoading] = useState(true);
   const [fullData, setFullData] = useState([]);
   const [pageData, setPageData] = useState([]);
@@ -258,4 +258,4 @@ const ListingComplete = () => {
   );
 };
 
-export default ListingComplete;
+export default POIndiaData;

@@ -46,7 +46,7 @@ const AsklailaUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_asklaila_data",
+        "/asklaila/upload/asklaila-data",
         formData,
         {
           headers: {

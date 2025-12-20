@@ -46,7 +46,7 @@ const AtmUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_Atm_data",
+        "/atm/upload/atm-data",
         formData,
         {
           headers: {

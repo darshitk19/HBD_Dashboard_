@@ -46,7 +46,7 @@ const CollegeDuniaUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_CollegeDunia_data",
+        "/college-dunia/upload/college-dunia-data",
         formData,
         {
           headers: {

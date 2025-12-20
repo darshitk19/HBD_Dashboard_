@@ -23,6 +23,8 @@ import CitiesReports from "./componunts/Reports/cities_reports";
 import CategoriesReports from "./componunts/Reports/categories_reports";
 import BusinessCategory from "./componunts/masterdata/BusinessCategory";
 import ServiceCategory from "./componunts/masterdata/ServiceCategory";
+import HeyPlacesData from "./componunts/listing master data/HeyPlacesData.jsx";
+import BankData from "./componunts/listing master data/BankData";
 import ProductCategory from "./componunts/masterdata/ProductCategory";
 import ListingComplete from "./componunts/listing master data/ListingComplate";
 import ListingIncomplate from "./componunts/listing master data/ListingIncomplate";
@@ -50,7 +52,7 @@ import State from "./componunts/masterdata/location msater/State";
 import Country from "./componunts/masterdata/location msater/Country";
 import Area from "./componunts/masterdata/location msater/Area";
 import City from "./componunts/masterdata/location msater/City";
-import GoogleData from "./componunts/listing master data/GoogleData";
+import GoogleData from "./componunts/listing master data/ShikshaData";
 import GoogleMapData from "./componunts/listing master data/GoogleMapData";
 import CollegeDuniaData from "./componunts/listing master data/CollegeDuniaData";
 import MagicPinData from "./componunts/listing master data/MagicPinData";
@@ -62,7 +64,7 @@ import NearBuyData from "./componunts/listing master data/NearBuyData";
 import SchoolgisData from "./componunts/listing master data/SchoolgisData";
 import YellowPagesData from "./componunts/listing master data/YellowPagesData";
 import PindaData from "./componunts/listing master data/PindaData";
-import GoogleUploader from "./componunts/data import/GoogleUploader";
+import GoogleUploader from "./componunts/data import/ShikshaUploader";
 import BankDataUploader from "./componunts/data import/BankDataUploader";
 import CollegeDuniaUploader from "./componunts/data import/CollegeDuniaUploader";
 import HeyPlacesUploader from "./componunts/data import/HeyPlacesUploader";
@@ -76,6 +78,8 @@ import GoogleMapUploader from "./componunts/data import/GoogleMapUploader";
 import JustdialUploader from "./componunts/data import/JustdialUploader";
 import FreelistingUploader from "./componunts/data import/FreelistingUploader";
 import PostOfficeUploader from "./componunts/data import/PostOfficeUploader";
+import ShikshaUploader from "./componunts/data import/ShikshaUploader";
+import ShikshaData from "./componunts/listing master data/ShikshaData";
 
 const icon = {
   className: "w-5 h-5 text-inherit",
@@ -145,6 +149,12 @@ export const routes = [
               },
               {
                 icon: <DocumentTextIcon {...icon} />,
+                name: "Shiksha",
+                path: "/data-imports/listing-data/shiksha",
+                element: <ShikshaUploader />,
+              },
+              {
+                icon: <DocumentTextIcon {...icon} />,
                 name: "Atm",
                 path: "/data-imports/listing-data/atm",
                 element: <AtmUploader />,
@@ -181,12 +191,6 @@ export const routes = [
               },
               {
                 icon: <DocumentTextIcon {...icon} />,
-                name: "PO India",
-                path: "/data-imports/listing-data/po-india",
-                element: <PostOfficeUploader />,
-              },
-              {
-                icon: <DocumentTextIcon {...icon} />,
                 name: "Near Buy",
                 path: "/data-imports/listing-data/near-buy",
                 element: <NearbuyUploader />,
@@ -200,8 +204,14 @@ export const routes = [
               {
                 icon: <DocumentTextIcon {...icon} />,
                 name: "Google Map",
-                path: "/data-imports/listing-data/googlemap-scrap",
+                path: "/data-imports/listing-data/google-map",
                 element: <GoogleMapUploader />,
+              },
+              {
+                icon: <DocumentTextIcon {...icon} />,
+                name: "Google",
+                path: "/data-imports/listing-data/google",
+                element: <GoogleUploader />,
               },
               {
                 icon: <DocumentTextIcon {...icon} />,
@@ -297,27 +307,27 @@ export const routes = [
           },
           {
             icon: <TableCellsIcon {...icon} />,
-            name: "Zomato Data",
-            path: "listing-master-data/zomato-data",
-            element: <ZomatoData />,
-          },
-          {
-            icon: <TableCellsIcon {...icon} />,
             name: "Magicpin",
             path: "listing-master-data/magicpin-data",
             element: <MagicPinData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
-            name: "Google Data",
-            path: "listing-master-data/google-data",
-            element: <GoogleData />,
+            name: "Shiksha Data",
+            path: "listing-master-data/Shiksha-data",
+            element: <ShikshaData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Google Maps",
-            path: "listing-master-data/googlemap-data",
+            path: "listing-master-data/google-map-data",
             element: <GoogleMapData />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Google Data",
+            path: "listing-master-data/google-data",
+            element: <GoogleData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
@@ -329,25 +339,25 @@ export const routes = [
             icon: <TableCellsIcon {...icon} />,
             name: "Bank Data",
             path: "listing-master-data/bank-data",
-            element: <BankDataUploader />,
+            element: <BankData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "College Dunia",
-            path: "listing-master-data/collegedunia-data",
+            path: "listing-master-data/college-dunia-data",
             element: <CollegeDuniaData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Heyplaces",
             path: "listing-master-data/heyplaces-data",
-            element: <HeyPlacesUploader />,
+            element: <HeyPlacesData />,
           },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Zomato Data",
             path: "listing-master-data/zomato-data",
-            element: "",
+            element: "ZomatoData />,",
           },
           {
             icon: <TableCellsIcon {...icon} />,
@@ -391,6 +401,12 @@ export const routes = [
             path: "listing-master-data/pinda-data",
             element: <PindaData />,
           },
+          {
+            icon: <XCircleIcon {...icon} />,
+            name: "Incomplete Data",
+            path: "listing-master-data/incomplete-data",
+            element: <ListingIncomplate />,
+          }
         ],
       },
       {

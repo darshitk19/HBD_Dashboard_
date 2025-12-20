@@ -46,7 +46,7 @@ const PostOfficeUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_PostOffice_data",
+        "/post-office/upload/post-office-data",
         formData,
         {
           headers: {

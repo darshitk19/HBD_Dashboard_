@@ -1,32 +1,52 @@
 import React, { useState } from "react";
 import api from "../../utils/Api";
 
+const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
+
 const GoogleUploader = () => {
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
   // Handle file selection
   const handleFileChange = (e) => {
-    console.log("Selected file:", e.target.files[0]);
-    setFile(e.target.files[0]);
+    const selectedFiles = Array.from(e.target.files);
+
+    // Validate file size & type
+    const validFiles = [];
+    for (let file of selectedFiles) {
+      if (!file.name.endsWith(".csv")) {
+        alert(`${file.name} is not a CSV file`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`${file.name} exceeds 30MB limit`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    setFiles(validFiles);
   };
 
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!file) {
-      setMessage("Please select a CSV file first!");
+    if (files.length === 0) {
+      alert("Please select at least one CSV file!");
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((file) => {
+      formData.append("files", file); // backend should accept "files"
+    });
 
     try {
-      setLoading(true); // start loading
+      setLoading(true);
+
       const response = await api.post(
-        "/upload_google_map_data", 
+        "/google/upload/google-data",
         formData,
         {
           headers: {
@@ -36,28 +56,39 @@ const GoogleUploader = () => {
       );
 
       console.log("Upload successful:", response.data);
-      alert("File uploaded successfully!");
-      setFile(null); // clear file after upload
+      alert("Files uploaded successfully!");
+      setFiles([]);
     } catch (error) {
-      console.error("Error uploading file:", error);
+      console.error("Error uploading files:", error);
       alert("File upload failed!");
     } finally {
-      setLoading(false); // stop loading
+      setLoading(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-md bg-white rounded-lg shadow mt-6">
-      <h2 className="text-xl font-bold mb-4">Upload Listing CSV File</h2>
+    <div className="p-6 max-w-xlg bg-white rounded-lg shadow mt-6">
+      <h2 className="text-xl font-bold mb-4">Upload Google CSV Files</h2>
 
       <form onSubmit={handleSubmit}>
         <input
           type="file"
           accept=".csv"
+          multiple
           onChange={handleFileChange}
           disabled={loading}
           className="mb-4 block w-full border border-gray-300 rounded-lg p-2"
         />
+
+        {files.length > 0 && (
+          <ul className="mb-4 text-sm text-gray-700">
+            {files.map((file, index) => (
+              <li key={index}>
+                {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+              </li>
+            ))}
+          </ul>
+        )}
 
         <button
           type="submit"

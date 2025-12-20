@@ -46,7 +46,7 @@ const BankDataUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/upload_BankData_data",
+        "/bank/upload/bank-data",
         formData,
         {
           headers: {

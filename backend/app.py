@@ -778,46 +778,7 @@ def upload_amazon_products_data():
         if request.files:
             files = request.files.getlist("file")
             total_row_data = []
-            for file in files:
-                if file.filename == "": # handling empty files
-                    continue   
-                currFile = pd.read_csv(file)
-                for row in currFile.itertuples(index=False):
-                    row_tuple = (
-                    safe_get(row, 'ASIN'),                             
-                    safe_get(row, 'Product_name'),
-                    safe_get(row, 'price'),
-                    safe_get(row, 'rating'),
-                    safe_get(row, 'Number_of_ratings'),
-                    safe_get(row, 'Brand'),
-                    safe_get(row, 'Seller'),
-                    safe_get(row, 'category'),
-                    safe_get(row, 'subcategory'),
-                    safe_get(row, 'sub_sub_category'),
-                    safe_get(row, 'category_sub_sub_sub'),
-                    safe_get(row, 'colour'),
-                    safe_get(row, 'size_options'),
-                    safe_get(row, 'description'),
-                    safe_get(row, 'link'),
-                    safe_get(row, 'Image_URLs'),
-                    safe_get(row, 'About_the_items_bullet'),
-                    safe_get(row, 'Product_details'),
-                    safe_get(row, 'Additional_Details'),
-                    safe_get(row, 'Manufacturer_Name'),
-                    )
-                    total_row_data.append(row_tuple)
-                    inserted+=1  # keeping track of total rows being added
-
-            # storing the valus in the database
-            upload_amazon_products_data_query = '''
-                INSERT INTO amazon_products (
-                    ASIN, Product_name, price, rating, Number_of_ratings, Brand, Seller, category, subcategory, sub_sub_category, category_sub_sub_sub,colour,size_options,description,link,Image_URLs,About_the_items_bullet,Product_details,Additional_Details,Manufacturer_Name
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            '''
-            cursor.executemany(upload_amazon_products_data_query,
-                total_row_data
-            )
-            connection.commit()
+            
     except Error as e:
         print(f"Error uploading data inside the amazon_products table: {e}")
         return jsonify({
@@ -872,6 +833,45 @@ app.register_blueprint(item_duplicate_bp)
 # upload others csv
 from routes.upload_others_csv import upload_others_csv_bp
 app.register_blueprint(upload_others_csv_bp)
+
+# Listing data routes
+from routes.listing_routes.upload_asklaila_route import asklaila_bp
+from routes.listing_routes.upload_atm_route import atm_bp
+from routes.listing_routes.upload_bank_route import bank_bp
+from routes.listing_routes.upload_college_dunia_route import college_dunia_bp
+from routes.listing_routes.upload_freelisting_route import freelisting_bp
+from routes.listing_routes.upload_google_map_route import google_map_bp
+from routes.listing_routes.upload_google_map_scrape_route import google_map_scrape_bp
+from routes.listing_routes.upload_heyplaces_route import heyplaces_bp
+from routes.listing_routes.upload_justdial_route import justdial_bp
+from routes.listing_routes.upload_magicpin_route import magicpin_bp
+from routes.listing_routes.upload_nearbuy_route import nearbuy_bp
+from routes.listing_routes.upload_pinda_route import pinda_bp
+from routes.listing_routes.upload_post_office_route import post_office_bp
+from routes.listing_routes.upload_schoolgis_route import schoolgis_bp
+from routes.listing_routes.upload_shiksha_route import shiksha_bp
+from routes.listing_routes.upload_yellow_pages_route import yellow_pages_bp
+
+blueprints_listing = [(asklaila_bp, "/asklaila"),
+    (atm_bp, "/atm"),
+    (bank_bp, "/bank"),
+    (college_dunia_bp, "/college-dunia"),
+    (freelisting_bp, "/freelisting"),
+    (google_map_bp, "/google-map"),
+    (google_map_scrape_bp, "/google-map-scrape"),
+    (heyplaces_bp, "/heyplaces"),
+    (justdial_bp, "/justdial"),
+    (magicpin_bp, "/magicpin"),
+    (nearbuy_bp, "/nearbuy"),
+    (pinda_bp, "/pinda"),
+    (post_office_bp, "/post-office"),
+    (schoolgis_bp, "/schoolgis"),
+    (shiksha_bp, "/shiksha"),
+    (yellow_pages_bp, "/yellow-pages"),
+    ]
+
+for bp,prefix in blueprints_listing:
+    app.register_blueprint(bp,url_prefix=prefix)
 
 if __name__ == '__main__':
     import argparse

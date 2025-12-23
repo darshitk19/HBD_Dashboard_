@@ -18,8 +18,8 @@ import {
 import api from "../utils/Api";
 
 import {StatisticsChart} from "../widgets/charts/statistics-chart";
-import {statisticsChartsData} from "../data/statistics-charts-data";
 import { ClockIcon } from "@heroicons/react/24/solid";
+import statisticsChartsData2 from "../data/statistics-charts-data2";
 
 export function Dasboard2() {
   const [stats, setStats] = useState({
@@ -114,7 +114,7 @@ export function Dasboard2() {
 
       {/* Charts */}
       <div className="mb-6 grid grid-cols-1 gap-y-12 gap-x-6 md:grid-cols-2 xl:grid-cols-3">
-        {statisticsChartsData.map((props) => (
+        {statisticsChartsData2.map((props) => (
           <StatisticsChart
             key={props.title}
             {...props}

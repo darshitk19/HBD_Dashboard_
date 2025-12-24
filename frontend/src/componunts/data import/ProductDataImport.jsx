@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import api from "../../utils/Api";
+import { Alert } from "@material-tailwind/react";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
 const ProductDataImport = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
 
   // Handle file selection
   const handleFileChange = (e) => {
@@ -33,7 +35,8 @@ const ProductDataImport = () => {
     e.preventDefault();
 
     if (files.length === 0) {
-      alert("Please select at least one CSV file!");
+      // alert("Please select at least one CSV file!");
+      setUploadResult("no-files")
       return;
     }
 
@@ -44,6 +47,7 @@ const ProductDataImport = () => {
 
     try {
       setLoading(true);
+      setUploadResult(null);
 
       const response = await api.post(
         "/product/upload/product-data",
@@ -56,11 +60,13 @@ const ProductDataImport = () => {
       );
 
       console.log("Upload successful:", response.data);
-      alert("Files uploaded successfully!");
+      // alert("Files uploaded successfully!");
+      setUploadResult("success");
       setFiles([]);
     } catch (error) {
       console.error("Error uploading files:", error);
-      alert("File upload failed!");
+      // alert("File upload failed!");
+      setUploadResult("error");
     } finally {
       setLoading(false);
     }
@@ -93,11 +99,10 @@ const ProductDataImport = () => {
         <button
           type="submit"
           disabled={loading}
-          className={`px-4 py-2 rounded-lg text-white flex items-center justify-center ${
-            loading
-              ? "bg-gray-500 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-700"
-          }`}
+          className={`px-4 py-2 rounded-lg text-white flex items-center justify-center ${loading
+            ? "bg-gray-500 cursor-not-allowed"
+            : "bg-blue-600 hover:bg-blue-700"
+            }`}
         >
           {loading ? (
             <span className="flex items-center">
@@ -127,6 +132,24 @@ const ProductDataImport = () => {
             "Upload"
           )}
         </button>
+        {/* Alert Showing */}
+        {
+          uploadResult && (
+            <Alert
+              color={uploadResult === "success" ? "green" :
+                uploadResult === "no-files" ? "amber" :
+                  "red"
+              }
+              onClose={() => setUploadResult(null)}
+              dismissible
+              className="mt-4"
+            >
+              {uploadResult === "success" && "Files uploaded successfully"}
+              {uploadResult === "error" && "File upload failed"}
+              {uploadResult === "no-files" && "Please select at least one CSV file!"}
+            </Alert>
+          )
+        }
       </form>
     </div>
   );

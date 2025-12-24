@@ -51,6 +51,33 @@ const scrappingTrend = {
   },
 };
 
+const categoriesData = {
+  type: "pie",
+  height: 220,
+  series: [700, 300], // Product Listing, Others
+  options: {
+    labels: ["Product Listing", "Others"],
+    colors: ["#008FFB", "#00E396"],
+    legend: {
+      position: "bottom",
+    },
+    responsive: [
+      {
+        breakpoint: 480,
+        options: {
+          chart: {
+            width: 300,
+          },
+          legend: {
+            position: "bottom",
+          },
+        },
+      },
+    ],
+  },
+};
+
+
 export const statisticsChartsData2 = [
   {
     color: "white",
@@ -65,6 +92,13 @@ export const statisticsChartsData2 = [
     description: "Last Campaign Performance",
     footer: "just updated",
     chart: scrappingTrend,
+  },
+  {
+    color: "white",
+    title: "Scraping Trend",
+    description: "Last Campaign Performance",
+    footer: "just updated",
+    chart: categoriesData,
   },
 ];
 

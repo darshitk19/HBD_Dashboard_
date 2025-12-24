@@ -21,7 +21,7 @@ import SlotCounter from "react-slot-counter";
 import api from "../utils/Api";
 
 import {StatisticsChart} from "../widgets/charts/statistics-chart";
-import { ClockIcon } from "@heroicons/react/24/solid";
+// import { ClockIcon } from "@heroicons/react/24/solid";
 import statisticsChartsData2 from "../data/statistics-charts-data2";
 
 export function ReportDashboard() {

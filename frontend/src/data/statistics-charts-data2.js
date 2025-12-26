@@ -1,4 +1,5 @@
 // import { chartsConfig } from "@/configs";
+import { filter, values } from "lodash";
 import { chartsConfig } from "../configs/charts-config";
 
 const dataScrapped = {
@@ -21,7 +22,7 @@ const dataScrapped = {
     },
     xaxis: {
       ...chartsConfig.xaxis,
-      categories: ["D-Mart","Amazon", "Google Map"],
+      categories: ["D-Mart", "Amazon", "Google Map"],
     },
   },
 };
@@ -46,7 +47,7 @@ const scrappingTrend = {
     },
     xaxis: {
       ...chartsConfig.xaxis,
-      categories: ["D-Mart","Amazon", "Google Map"],
+      categories: ["D-Mart", "Amazon", "Google Map"],
     },
   },
 };
@@ -54,27 +55,74 @@ const scrappingTrend = {
 const categoriesData = {
   type: "pie",
   height: 268,
-  series: [700, 300, 400], // Product Listing, Others
+  series: [700, 300, 400], // Product, Listing, Others
   options: {
-    labels: ["Product", "Listing", "Others"],
-    colors: ["#008FFB", "#00E396", "#FFFF00"],
-    legend: {
-      position: "bottom",
-      fontSize: "13px",
+    chart: {
+      fontFamily: "inherit",
     },
-    responsive: [
-      {
-        breakpoint: 480,
-        options: {
-          chart: {
-            width: 300,
-          },
-          legend: {
-            position: "bottom",
-          },
+    labels: ["Product", "Listing", "Others"],
+    colors: ["#EF4444", "#10B981", "#8B5CF6"],
+
+    // 1. Plot Options (Text ko position set karne k liye)
+    plotOptions: {
+      pie: {
+        dataLabels: {
+          offset: -8,
+          minAngleToShowLabel: 10,
         },
       },
-    ],
+    },
+
+    // 2. DataLabels (Percentage Text)
+    dataLabels: {
+      enabled: true,
+      style: {
+        fontSize: "12px",
+        fontWeight: 500,
+        colors: ["#ffffff"],
+        fontFamily: "inherit",
+        shadow: {
+        top: 1,
+        left: 1,
+        blur: 2,
+        color: "#000",
+        opacity: 0.5,
+      },
+      },
+    },
+
+    legend: {
+      show: true,
+      position: "bottom",
+      fontSize: "13px",
+      fontWeight: 400,
+      itemMargin: {
+        horizontal: 10,
+        vertical: 5,
+      },
+      onItemHover: {
+        highlightDataSeries: true
+      },
+    },
+
+    // 4. Tooltip (Hover effect)
+    tooltip: {
+      theme: "light",
+      fillSeriesColor: false,
+      style: {
+        fontSize: "13px",
+        fontFamily: "inherit",
+        color: "#333",
+      },
+      marker: {
+        show: true,
+      },
+      y: {
+        formatter: function (val) {
+          return val;
+        },
+      },
+    },
   },
 };
 

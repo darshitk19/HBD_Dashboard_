@@ -35,6 +35,7 @@ from model.user import User
 from model.amazon_product_model import AmazonProduct
 from model.googlemap_data import GooglemapData
 from model.item_csv_model import ItemData
+from model.master_table_model import MasterTable
 
 with app.app_context():
     db.create_all()
@@ -805,6 +806,10 @@ app.register_blueprint(auth_bp)
 # googlemapdata endpoint
 from routes.googlemap import googlemap_bp
 app.register_blueprint(googlemap_bp)
+
+# master_table endpoint
+from routes.master_table import master_table_bp
+app.register_blueprint(master_table_bp)
 
 # upload product csv 
 from routes.upload_product_csv import product_csv_bp

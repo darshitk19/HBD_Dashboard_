@@ -61,7 +61,7 @@ const MasterDataRegistry = () => {
   ];
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/get-all-master-data')
+    fetch('http://localhost:5000/api/master_table')
       .then(res => res.json())
       .then(data => {
         setAllData(data);

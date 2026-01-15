@@ -4,8 +4,8 @@ from werkzeug.utils import secure_filename
 import os 
 from utils.storage import get_upload_base_dir
 
-big_basket_bp = Blueprint("big_basket_bp",__name__)
-@big_basket_bp.route("/upload/big-basket-data",methods=["POST"])
+bigbasket_bp = Blueprint("bigbasket_bp",__name__)
+@bigbasket_bp.route("/upload/bigbasket-data",methods=["POST"])
 
 def upload_big_basket_route():
     files = request.files.getlist("files")

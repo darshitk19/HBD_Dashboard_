@@ -34,3 +34,4 @@ import tasks.listings_task.upload_schoolgis_task
 import tasks.listings_task.upload_yellow_pages_task
 import tasks.listings_task.upload_shiksha_task
 import tasks.products_task.upload_amazon_products_task
+import tasks.products_task.upload_big_basket_task

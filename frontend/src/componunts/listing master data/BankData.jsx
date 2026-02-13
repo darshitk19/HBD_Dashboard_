@@ -17,7 +17,7 @@ import {
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
 
 const bankColumns = [
-  { key: "name", label: "Bank Name", width: 200 },
+  { key: "bank", label: "Bank Name", width: 200 },
   { key: "branch", label: "Branch", width: 180 },
   { key: "ifsc", label: "IFSC Code", width: 120 },
   { key: "city", label: "City", width: 120 },

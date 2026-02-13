@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from extensions import db
-from model.atm import Atm
+from model.atm import ATM 
 
 atm_bp = Blueprint('atm_bp', __name__)
 
@@ -12,13 +12,14 @@ def fetch_atm_data():
         search = request.args.get('search', '')
         city_filter = request.args.get('city', '')
 
-        query = Atm.query
+        # Use ATM (all caps) to match your import
+        query = ATM.query
 
         if search:
-            query = query.filter(Atm.name.ilike(f"%{search}%"))
+            query = query.filter(ATM.name.ilike(f"%{search}%"))
         
         if city_filter:
-            query = query.filter(Atm.city.ilike(f"%{city_filter}%"))
+            query = query.filter(ATM.city.ilike(f"%{city_filter}%"))
 
         pagination = query.paginate(page=page, per_page=limit, error_out=False)
         
@@ -30,4 +31,5 @@ def fetch_atm_data():
         }), 200
 
     except Exception as e:
+        print(f"❌ Error in ATM fetch: {str(e)}") # Log this to Docker
         return jsonify({"error": str(e)}), 500

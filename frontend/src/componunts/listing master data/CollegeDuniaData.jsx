@@ -1,13 +1,5 @@
-/*
- * BACKEND TEAM INSTRUCTIONS:
- * ---------------------------------------------------------
- * Endpoint: GET / (Root)
- * Logic: When 'source=college-dunia' is passed, filter the master_table for College Dunia records only.
- * Pagination: Use OFFSET {(page - 1) * 10} LIMIT 10.
- * ---------------------------------------------------------
- */
-
 import React, { useEffect, useState, useCallback } from "react";
+import api from "@/utils/Api"; // Use your existing axios utility
 import {
   Button,
   Card,
@@ -24,17 +16,18 @@ import {
 } from "@heroicons/react/24/solid";
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
 
+// Updated keys to match the database image fields
 const collegeDuniaColumns = [
   { key: "name", label: "Institution Name", width: 220 },
   { key: "address", label: "Address", width: 320 },
-  { key: "phone_number", label: "Contact No", width: 140 },
+  { key: "number", label: "Contact No", width: 140 }, // Changed from phone_number
   { key: "category", label: "Category", width: 160 },
   { key: "city", label: "City", width: 120 },
   { key: "area", label: "Area", width: 140 },
-  { key: "pincode", label: "Pincode", width: 100 },
+  { key: "avg_fees", label: "Avg Fees", width: 120 }, // Added from image fields
 ];
 
-const CollegeDuniaDataTable = () => {
+const CollegeDuniaData = () => { // Renamed for consistency
   const [loading, setLoading] = useState(true);
   const [pageData, setPageData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,25 +44,26 @@ const CollegeDuniaDataTable = () => {
     setError(null);
     try {
       const queryParams = new URLSearchParams({
-        source: "college-dunia", // Updated source parameter
         page: currentPage,
         limit: limit,
         search: search,
         city: citySearch,
       });
 
-      const response = await fetch(`http://localhost:5000/?${queryParams}`);
-      
-      if (!response.ok) throw new Error("Backend connection failed");
-
-      const result = await response.json();
+      // Point to the correct Flask endpoint on port 8000
+      const response = await api.get(`/college-dunia/fetch-data?${queryParams}`);
+      const result = response.data;
       
       setPageData(result.data || []);
       setTotalPages(result.total_pages || 1);
       setTotalRecords(result.total_count || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to Fetch data from backend");
+      if (err.code === "ERR_NETWORK") {
+        setError("Backend offline. Ensure Flask port 8000 is running.");
+      } else {
+        setError("Failed to fetch College Dunia data.");
+      }
     } finally {
       setLoading(false);
     }
@@ -78,10 +72,6 @@ const CollegeDuniaDataTable = () => {
   useEffect(() => {
     fetchCollegeDuniaData();
   }, [fetchCollegeDuniaData]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, citySearch]);
 
   const exportToExcel = () => {
     if (!pageData.length) return;
@@ -96,32 +86,21 @@ const CollegeDuniaDataTable = () => {
       <div className="flex justify-between items-end mb-6">
         <div>
           <Typography variant="h4" className="font-bold text-blue-gray-900">
-            College Dunia Data
+            College Dunia Data Master
           </Typography>
           <Typography variant="small" className="font-medium text-gray-500">
             {error ? (
               <span className="text-red-500 font-bold">{error}</span>
             ) : (
-              `Displaying verified records from College Dunia (${totalRecords} total)`
+              `Records: ${totalRecords} total`
             )}
           </Typography>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="gradient" 
-            color="green" 
-            size="sm" 
-            className="flex items-center gap-2"
-            onClick={exportToExcel}
-          >
-            <ArrowDownTrayIcon className="h-4 w-4" /> Export Page
+          <Button variant="gradient" color="green" size="sm" className="flex items-center gap-2" onClick={exportToExcel}>
+            <ArrowDownTrayIcon className="h-4 w-4" /> Export
           </Button>
-          <Button 
-            variant="outlined" 
-            size="sm" 
-            className="flex items-center gap-2"
-            onClick={fetchCollegeDuniaData}
-          >
+          <Button variant="outlined" size="sm" className="flex items-center gap-2" onClick={fetchCollegeDuniaData}>
             <ArrowPathIcon className="h-4 w-4" /> Refresh
           </Button>
         </div>
@@ -132,18 +111,10 @@ const CollegeDuniaDataTable = () => {
           <div className="flex flex-wrap items-center justify-between gap-y-4">
             <div className="flex w-full shrink-0 gap-2 md:w-max">
               <div className="w-72">
-                <Input 
-                  label="Search Institution Name" 
-                  value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
-                />
+                <Input label="Search Institution" value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} />
               </div>
               <div className="w-48">
-                <Input 
-                  label="Filter by City" 
-                  value={citySearch} 
-                  onChange={(e) => setCitySearch(e.target.value)} 
-                />
+                <Input label="Filter City" value={citySearch} onChange={(e) => { setCitySearch(e.target.value); setCurrentPage(1); }} />
               </div>
             </div>
             
@@ -152,22 +123,8 @@ const CollegeDuniaDataTable = () => {
                 Page {currentPage} of {totalPages}
               </Typography>
               <div className="flex gap-2">
-                <Button 
-                  variant="outlined" 
-                  size="sm" 
-                  disabled={currentPage === 1 || loading} 
-                  onClick={() => setCurrentPage(p => p - 1)}
-                >
-                  Previous
-                </Button>
-                <Button 
-                  variant="outlined" 
-                  size="sm" 
-                  disabled={currentPage === totalPages || loading} 
-                  onClick={() => setCurrentPage(p => p + 1)}
-                >
-                  Next
-                </Button>
+                <Button variant="outlined" size="sm" disabled={currentPage === 1 || loading} onClick={() => setCurrentPage(p => p - 1)}>Prev</Button>
+                <Button variant="outlined" size="sm" disabled={currentPage === totalPages || loading} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
               </div>
             </div>
           </div>
@@ -177,50 +134,34 @@ const CollegeDuniaDataTable = () => {
           {loading ? (
             <div className="flex flex-col justify-center py-24 items-center gap-4">
               <Spinner className="h-10 w-10 text-blue-500" />
-              <Typography className="animate-pulse font-medium text-gray-600">
-                Synchronizing with Master Table...
-              </Typography>
+              <Typography className="animate-pulse">Fetching College Data...</Typography>
             </div>
           ) : (
             <table className="w-full min-w-[1200px] table-fixed text-left">
               <thead>
                 <tr>
                   {collegeDuniaColumns.map((col) => (
-                    <th
-                      key={col.key}
-                      style={{ width: col.width }}
-                      className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4 transition-colors"
-                    >
-                      <Typography
-                        variant="small"
-                        color="blue-gray"
-                        className="flex items-center justify-between gap-2 font-bold leading-none opacity-70"
-                      >
-                        {col.label} <ChevronUpDownIcon strokeWidth={2} className="h-4 w-4" />
-                      </Typography>
+                    <th key={col.key} style={{ width: col.width }} className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4">
+                      <Typography variant="small" color="blue-gray" className="font-bold opacity-70">{col.label}</Typography>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {pageData.length > 0 ? (
-                  pageData.map((row, index) => (
-                    <tr key={index} className="even:bg-blue-gray-50/50 hover:bg-blue-50 transition-colors">
+                  pageData.map((row, idx) => (
+                    <tr key={idx} className="even:bg-blue-gray-50/50 hover:bg-blue-50 transition-colors">
                       {collegeDuniaColumns.map((col) => (
                         <td key={col.key} className="p-4 border-b border-blue-gray-50">
-                          <Typography variant="small" color="blue-gray" className="font-normal break-words">
-                            {row[col.key] || "-"}
-                          </Typography>
+                          <Typography variant="small" className="font-normal break-words">{row[col.key] || "-"}</Typography>
                         </td>
                       ))}
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={collegeDuniaColumns.length} className="p-20 text-center">
-                      <Typography variant="h6" color="blue-gray" className="opacity-40 italic">
-                        {error || "No records found for the selected filters"}
-                      </Typography>
+                    <td colSpan={collegeDuniaColumns.length} className="p-20 text-center italic opacity-40">
+                      {error || "No college records found."}
                     </td>
                   </tr>
                 )}
@@ -233,4 +174,4 @@ const CollegeDuniaDataTable = () => {
   );
 };
 
-export default CollegeDuniaDataTable;
+export default CollegeDuniaData;

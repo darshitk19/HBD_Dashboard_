@@ -28,9 +28,8 @@ const MasterDataDashboard = () => {
     const fetchSQLData = async () => {
       try {
         const endpoint = taskId 
-            ? `/api/master-dashboard-stats?task_id=${taskId}` 
-            : `/api/master-dashboard-stats`;
-
+    ? `/master-dashboard-stats?task_id=${taskId}` 
+    : `/master-dashboard-stats`;
         const res = await api.get(endpoint);
         
         if (!isMounted) return;

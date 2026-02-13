@@ -69,7 +69,7 @@ def get_upload_report(task_id):
     finally:
         session.close()
 
-@master_table_bp.route("/api/master-dashboard-stats", methods=["GET"])
+@master_table_bp.route("/master-dashboard-stats", methods=["GET"])
 def get_master_dashboard_stats():
     session = get_db_session()
     task_id = request.args.get('task_id')

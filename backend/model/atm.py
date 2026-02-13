@@ -1,27 +1,26 @@
 from extensions import db
 
-class Atm(db.Model):
+class ATM(db.Model):
     __tablename__ = 'atm'
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255))
+    # Changed 'name' to 'bank' to match your database image
+    bank = db.Column(db.String(255)) 
     address = db.Column(db.Text)
     city = db.Column(db.String(100))
     state = db.Column(db.String(100))
-    pincode = db.Column(db.String(20))
-    
-    # Common fields often found in ATM datasets
-    latitude = db.Column(db.String(50))
-    longitude = db.Column(db.String(50))
-    bank_name = db.Column(db.String(255)) 
+    country = db.Column(db.String(100))
+    category = db.Column(db.String(100))
+    source = db.Column(db.String(100))
+    bank_address_hash = db.Column(db.String(255))
 
     def to_dict(self):
         return {
             "id": self.id,
-            "name": self.name,
+            "name": self.bank, # Map 'bank' to 'name' for your frontend
             "address": self.address,
             "city": self.city,
             "state": self.state,
-            "pincode": self.pincode,
-            "bank_name": self.bank_name
+            "country": self.country,
+            "category": self.category
         }

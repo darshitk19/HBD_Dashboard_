@@ -22,11 +22,6 @@ export function Auth() {
       icon: UserIcon,
     },
     {
-      name: "sign up",
-      path: "/auth/sign-up",
-      icon: UserPlusIcon,
-    },
-    {
       name: "sign in",
       path: "/auth/sign-in",
       icon: ArrowRightOnRectangleIcon,

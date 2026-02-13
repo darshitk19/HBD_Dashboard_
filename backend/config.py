@@ -21,12 +21,22 @@ class Config:
     }
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # JWT configuration
+    # --- JWT CONFIGURATION (FIXED) ---
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     if not JWT_SECRET_KEY:
         raise ValueError("JWT_SECRET_KEY must be set in .env file")
     
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # 30-minute session timeout
+    # 1. Store token in cookies (Auto-login)
+    JWT_TOKEN_LOCATION = ['cookies']
+
+    # 2. Allow cookies over HTTP (Change to True if using HTTPS)
+    JWT_COOKIE_SECURE = False 
+
+    # 3. Disable CSRF for now (To prevent "Missing CSRF" errors during login)
+    JWT_COOKIE_CSRF_PROTECT = False
+
+    # 4. Session Timeout: Increased from 30 mins to 30 DAYS
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30) 
 
     # Mail configuration
     MAIL_SERVER = 'smtp.gmail.com'

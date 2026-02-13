@@ -5,7 +5,7 @@ from flask_jwt_extended import verify_jwt_in_request
 from dotenv import load_dotenv
 
 from config import Config
-from extensions import db, jwt, cors, mail
+from extensions import db, jwt, cors, mail,migrate
 
 # --- Import Models ---
 from model.user import User
@@ -17,6 +17,11 @@ from model.master_table_model import MasterTable
 from model.upload_master_reports_model import UploadReport
 from model.listing_master import ListingMaster
 
+# ADDED IMPORTS TO PROTECT EXISTING TABLES:
+from model.asklaila import Asklaila
+from model.atm import ATM
+from model.bank import Bank
+from model.college_dunia import CollegeDunia
 # --- Import Blueprints ---
 from routes.auth_route import auth_bp
 from routes.scraper_routes import scraper_bp
@@ -65,20 +70,11 @@ from routes.product_routes.upload_jio_mart_route import jiomart_bp
 load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
-blueprints_listing = [
-    (asklaila_bp, "/asklaila"), (atm_bp, "/atm"), (bank_bp, "/bank"),
-    (college_dunia_bp, "/college-dunia"), (freelisting_bp, "/freelisting"),
-    (gmap_upload_bp, "/google-map"), (google_map_scrape_bp, "/google-map-scrape"),
-    (heyplaces_bp, "/heyplaces"), (justdial_bp, "/justdial"), (magicpin_bp, "/magicpin"),
-    (nearbuy_bp, "/nearbuy"), (pinda_bp, "/pinda"), (post_office_bp, "/post-office"),
-    (schoolgis_bp, "/schoolgis"), (shiksha_bp, "/shiksha"), (yellow_pages_bp, "/yellow-pages"),
-    (amazon_upload_bp, "/amazon"), (vivo_bp, "/vivo"), (blinkit_bp, "/blinkit"),
-    (dmart_bp, "/dmart"), (flipkart_bp, "/flipkart"), (indiamart_bp, "/india-mart"),
-    (jiomart_bp, "/jio-mart"), (bigbasket_bp, "/big-basket")
-]
+
 
 # Init extensions
 db.init_app(app)
+migrate.init_app(app, db)
 jwt.init_app(app)
 
 # 1. FIX CORS: Explicitly allow frontend origin
@@ -99,7 +95,11 @@ PUBLIC_ROUTES = [
     "/auth/verify-otp", 
     "/auth/reset-password", 
     "/health",
-    "/api/master-dashboard-stats"
+    "/api/master-dashboard-stats",
+    "/atm/fetch-data",
+    "/api/bank/fetch-data",
+    "/asklaila/fetch-data",
+    "/college-dunia/fetch-data",
 ]
 
 @app.before_request
@@ -107,14 +107,19 @@ def protect_all_routes():
     if request.method == "OPTIONS":
         return jsonify({"message": "CORS preflight successful"}), 200
         
-    if request.path in PUBLIC_ROUTES:
+    # Standardize the path by removing trailing slashes for the check
+    normalized_path = request.path.rstrip('/')
+    # Standardize the public routes list too
+    normalized_public_routes = [route.rstrip('/') for route in PUBLIC_ROUTES]
+    
+    if normalized_path in normalized_public_routes or request.path in PUBLIC_ROUTES:
         return None
     
     try:
         verify_jwt_in_request()
     except Exception as e:
+        print(f"❌ JWT REJECTED for {request.path}: {str(e)}") 
         return jsonify({"message": "Missing or invalid token", "error": str(e)}), 401
-
 # --- Register Main Blueprints ---
 app.register_blueprint(auth_bp, url_prefix="/auth")
 app.register_blueprint(scraper_bp, url_prefix="/api")

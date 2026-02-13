@@ -25,7 +25,7 @@ const atmColumns = [
   { key: "address", label: "Address", width: 350 },
 ];
 
-const AtmDataTable = () => {
+const AtmData = () => {
   const [loading, setLoading] = useState(true);
   const [pageData, setPageData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -48,7 +48,6 @@ const AtmDataTable = () => {
         city: citySearch,
       });
 
-      // Note: Ensure /atm/fetch-data route exists in 'backend/routes/listing_routes/upload_atm_route.py'
       const response = await api.get(`/atm/fetch-data?${queryParams}`);
       const result = response.data;
 
@@ -57,7 +56,12 @@ const AtmDataTable = () => {
       setTotalRecords(result.total_count || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to Fetch ATM data. (Ensure Backend Route Exists)");
+      // Logic: If backend is crashed (like your ImportError), it shows 'Network Error'
+      if (err.code === "ERR_NETWORK") {
+        setError("Backend offline. Check Docker logs for ImportError.");
+      } else {
+        setError("Failed to fetch ATM data. Check backend routes.");
+      }
     } finally {
       setLoading(false);
     }
@@ -67,10 +71,7 @@ const AtmDataTable = () => {
     fetchAtmData();
   }, [fetchAtmData]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, citySearch]);
-
+  // Handle Export
   const exportToExcel = () => {
     if (!pageData.length) return;
     const ws = XLSX.utils.json_to_sheet(pageData);
@@ -81,6 +82,7 @@ const AtmDataTable = () => {
 
   return (
     <div className="min-h-screen mt-8 mb-12 px-4 rounded bg-white text-black">
+      {/* Header Section */}
       <div className="flex justify-between items-end mb-6">
         <div>
           <Typography variant="h4" className="font-bold text-blue-gray-900">
@@ -123,14 +125,20 @@ const AtmDataTable = () => {
                 <Input 
                   label="Search ATM Name" 
                   value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setCurrentPage(1); // Logic: Reset page on search
+                  }} 
                 />
               </div>
               <div className="w-48">
                 <Input 
                   label="Filter by City" 
                   value={citySearch} 
-                  onChange={(e) => setCitySearch(e.target.value)} 
+                  onChange={(e) => {
+                    setCitySearch(e.target.value);
+                    setCurrentPage(1); // Logic: Reset page on city filter
+                  }} 
                 />
               </div>
             </div>
@@ -177,7 +185,7 @@ const AtmDataTable = () => {
                     <th
                       key={col.key}
                       style={{ width: col.width }}
-                      className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4 transition-colors"
+                      className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4"
                     >
                       <Typography
                         variant="small"
@@ -207,7 +215,7 @@ const AtmDataTable = () => {
                   <tr>
                     <td colSpan={atmColumns.length} className="p-20 text-center">
                       <Typography variant="h6" color="blue-gray" className="opacity-40 italic">
-                        {error || "No ATM records found for the selected filters"}
+                        {error || "No ATM records found."}
                       </Typography>
                     </td>
                   </tr>
@@ -221,4 +229,4 @@ const AtmDataTable = () => {
   );
 };
 
-export default AtmDataTable;
+export default AtmData;

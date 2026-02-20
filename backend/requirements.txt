@@ -21,3 +21,5 @@ google-auth-httplib2
 google-auth-oauthlib
 gevent
 prometheus-client
+flask_mail
+flask_migrate

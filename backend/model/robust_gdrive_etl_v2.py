@@ -7,6 +7,7 @@ import hashlib
 import logging
 import threading
 import queue
+import redis
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.oauth2 import service_account

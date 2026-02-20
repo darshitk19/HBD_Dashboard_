@@ -52,11 +52,11 @@ DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAM
 MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '100'))
 ETL_VERSION = "2.0.0"
 
-# SECTION 1: Optimized SQLAlchemy Engine
+# SECTION 1: Optimized SQLAlchemy Engine (Scaled down for concurrent workers)
 engine = create_engine(
     DATABASE_URI,
-    pool_size=20,           # Matches worker concurrency
-    max_overflow=10,        # Burst capacity
+    pool_size=5,            # Reduced from 20 to 5 to prevent max_connections exhaustion with 50+ workers
+    max_overflow=5,         # Reduced burst capacity
     pool_timeout=30,        # Give up if DB is too busy
     pool_recycle=1800,      # Recycle connections every 30 mins
     pool_pre_ping=True      # Prevent "MySQL Wait Timeout" errors
@@ -78,8 +78,8 @@ except (OSError, ValueError):
     # signal handlers can only be set in the main thread
     pass
 
-# Fix 10: DB Rate Limiting
-db_semaphore = threading.Semaphore(10)
+# Fix 10: DB Rate Limiting (Removed local semaphore as it doesn't work across processes)
+# We will rely on Celery's worker concurrency flags to manage parallel workloads smoothly.
 
 
 def get_service():
@@ -169,19 +169,51 @@ def commit_batch(batch, task_id=None):
         row.setdefault('file_hash', '')
     # All DB operations are wrapped in context managers for resource safety.
 
+    from redis import Redis
+    
+    # 1. Deduplicate using Redis to avoid InnoDB gap-lock deadlocks on INSERT IGNORE
+    # We use a Redis Set storing Hashes of (Name + Phone + Address) to quickly filter out exact duplicates
+    # before they even hit the MySQL database.
+    try:
+        r = Redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"))
+        
+        unique_batch = []
+        for row in batch:
+            # Create a unique deterministic identity for the row
+            identity_string = f"{row.get('name', '')}|{row.get('phone_number', '')}|{row.get('address', '')}".lower().strip()
+            row_hash = hashlib.md5(identity_string.encode('utf-8')).hexdigest()
+            
+            # Check if this exact row has been processed before (using Redis Set)
+            # SADD returns 1 if added, 0 if it already existed
+            is_new = r.sadd("gdrive_etl_unique_records", row_hash)
+            
+            if is_new == 1:
+                unique_batch.append(row)
+            else:
+                # Row is a duplicate, skip it entirely
+                pass
+                
+        # If the entire batch was duplicates, return early
+        if not unique_batch:
+            return 0
+            
+    except Exception as e:
+        logger.warning(f"Redis deduplication failed, falling back to MySQL INSERT IGNORE: {e}")
+        unique_batch = batch # Fallback to sending all rows to MySQL if Redis fails
+        
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            with db_semaphore:  # Fix 10: Rate limiting
-                active_db_ops.inc()
-                try:
-                    with engine.begin() as conn:
-                        result = conn.execute(sql, batch)
-                        inserted = result.rowcount
-                        rows_inserted.inc(inserted)  # Fix 9: Metrics
-                        return inserted
-                finally:
-                    active_db_ops.inc(-1)
+            active_db_ops.inc()
+            try:
+                with engine.begin() as conn:
+                    result = conn.execute(sql, unique_batch)  # Insert only the globally unique rows
+                    inserted = result.rowcount
+                    rows_inserted.inc(inserted)  # Fix 9: Metrics
+                    return inserted
+            finally:
+                active_db_ops.inc(-1)
         except OperationalError as e:
             if '1213' in str(e) and attempt < max_retries - 1:
                 import random
@@ -264,6 +296,9 @@ def refresh_dashboard_stats():
             """), {"total": res[0], "states": res[1], "cats": res[2], "csvs": res[3]})
 
             # 2. UPSERT State-Category Summary
+            # Using READ UNCOMMITTED to prevent this heavy COUNT from placing shared locks
+            # on the raw_google_map_drive_data table, blocking incoming Celery batch inserts.
+            conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
             conn.execute(text("""
                 INSERT INTO state_category_summary_v5 (state, category, record_count)
                 SELECT state, category, COUNT(*) 
@@ -272,8 +307,9 @@ def refresh_dashboard_stats():
                 ON DUPLICATE KEY UPDATE 
                     record_count = VALUES(record_count)
             """))
+            conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
             
-        logger.info("Dashboard stats refreshed successfully.")
+        logger.info("Dashboard stats refreshed successfully without locking tables.")
     except Exception as e:
         logger.error(f"Stats Refresh Failed: {e}")
 
@@ -311,7 +347,7 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
     
     try:
         logger.debug(f"[START] Processing: {path}/{file_name}", extra={'task_id': task_id})
-        update_file_status(file_id, file_name, 'PROCESSING', file_hash=file_hash)
+        # Removed intermediate 'PROCESSING' state DB update to reduce MySQL row lock contention
 
         service = get_service()
         
@@ -329,6 +365,7 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
                     logger.info(f"[SHUTDOWN] Saving progress for {file_name} at row {row_count}...")
                     if batch:
                         commit_batch(batch, task_id=task_id)
+                    # Only log partial shutdowns to DB
                     update_file_status(file_id, file_name, 'PARTIAL', 
                                        error_msg=f"Shutdown at row {row_count}")
                     return f"Partial: {file_name} stopped at row {row_count}"

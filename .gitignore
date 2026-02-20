@@ -4,7 +4,10 @@ __pycache__/
 .DS_Store
 *.pyo
 *.pyd
+.venv/
 venv/
 backend/model/*.json
 backend/*.log
 *.log
+backend/.agent
+backend/.github/

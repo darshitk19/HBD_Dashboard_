@@ -1,9 +1,18 @@
-import os, sys, re, time, random, json, argparse, threading, csv
+from gevent import monkey
+monkey.patch_all()
+from flask import request, jsonify, render_template, redirect,Flask
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from datetime import datetime
+import pathlib
+from flask_cors import CORS
+import os, sys, re, time, random, json, argparse, threading, csv, hashlib, signal
 import pandas as pd
 import mysql.connector
 from mysql.connector import Error
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
+from model.robust_gdrive_etl_v2 import start_background_etl
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from flask import Flask, request, jsonify
@@ -18,6 +27,65 @@ from flask_jwt_extended import verify_jwt_in_request  # ADDED MISSING IMPORT
 from config import Config
 from extensions import db, jwt, cors, mail, migrate
 
+# Initialize Flask app
+# CORS is handled by extensions
+
+app = Flask(__name__)
+
+# Setup logging to file (rotates daily)
+# Custom Formatter to strip ANSI codes and format consistently
+class LogFormatter(logging.Formatter):
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+    def format(self, record):
+        # Create a copy to avoid modifying the original record
+        record_copy = logging.makeLogRecord(record.__dict__)
+        
+        # Strip ANSI codes from the message
+        if isinstance(record_copy.msg, str):
+            record_copy.msg = self.ansi_escape.sub('', record_copy.msg)
+            
+        # Format levelname to be fixed width (8 chars) for alignment
+        record_copy.levelname = f"{record_copy.levelname:<8}"
+        
+        return super().format(record_copy)
+
+# Setup logging to file (rotates daily)
+def setup_logging():
+    log_dir = pathlib.Path(__file__).parent / 'logs' / 'flask'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_filename = log_dir / f"flask_{datetime.now().strftime('%Y-%m-%d')}.log"
+
+    # Define format: Date Time | Level | Logger | Message
+    log_format = '%(asctime)s | %(levelname)s | %(name)-15s : %(message)s'
+    
+    # File Handler - Uses Custom Formatter (No Colors, Aligned)
+    file_handler = TimedRotatingFileHandler(str(log_filename), when='midnight', backupCount=14, encoding='utf-8')
+    file_formatter = LogFormatter(log_format, datefmt='%Y-%m-%d %H:%M:%S')
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.INFO)
+
+    # Stream Handler - Standard Formatter (Colors allowed if supported, but we keep it simple)
+    stream_handler = logging.StreamHandler()
+    stream_formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
+    stream_handler.setFormatter(stream_formatter)
+    stream_handler.setLevel(logging.INFO)
+
+    # Add handlers to root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+        
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)
+    
+    # Silence third-party noise if needed
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('werkzeug').setLevel(logging.INFO) 
+# CORS is handled by extensions
 # --- Models ---
 from model.user import User
 from model.amazon_product_model import AmazonProduct
@@ -87,6 +155,9 @@ mail.init_app(app)
 
 with app.app_context():
     db.create_all()
+    # Run Safe Migrations (Indexes & Schema Updates)
+    from utils.db_migrations import run_pending_migrations
+    run_pending_migrations(app)
 
 
 # --- GLOBAL JWT PROTECTION ---
@@ -253,6 +324,31 @@ class BusinessList:
 
                 insert_query = """
                 INSERT INTO google_Map (
+                    name, address, website, phone_number,
+                    reviews_count, reviews_average, category,
+                    subcategory, city, state, area
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+
+                # this will be used during the handling of duplicate entries
+                # ON DUPLICATE KEY UPDATE
+                #     website = VALUES(website),
+                #     phone_number = VALUES(phone_number),
+                #     reviews_count = VALUES(reviews_count),
+                #     reviews_average = VALUES(reviews_average),
+                #     subcategory = VALUES(subcategory),
+                #     area = VALUES(area)
+
+                insert_query_incomplete_entries = """
+                INSERT INTO businesses_incomplete (
+                    name, address, website, phone_number,
+                    reviews_count, reviews_average, category,
+                    subcategory, city, state, area
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+
+                insert_query_duplicate_entries = """
+                INSERT INTO businesses_duplicates (
                     name, address, website, phone_number,
                     reviews_count, reviews_average, category,
                     subcategory, city, state, area
@@ -586,11 +682,30 @@ if __name__ == '__main__':
     parser.add_argument("-t", "--total", type=int, help="Total items to search")
     args = parser.parse_args()
 
+    # Setup logging only if running as main application
+    setup_logging()
+
+    if args.runserver:
+        app.debug = True  # Set debug early so the check below sees it
+    
+    # Start thread
+    # Start thread
     print("Loaded DB:", os.getenv("DB_USER"), os.getenv("DB_NAME"))
     
     # Start background ETL thread
     print("🔗 Starting Background Sync Thread...")
-    threading.Thread(target=run_gdrive_ingestion_loop, daemon=True).start()
+    ingestor = start_background_etl()
+    
+    # Register Signal Handler for Graceful Shutdown
+    def signal_handler(sig, frame):
+        print('\n🛑 shutdown signal received. Stopping background threads...')
+        if ingestor:
+            ingestor.shutdown()
+        # Allow Flask to shutdown gracefully if needed, or just exit
+        sys.exit(0)
+        
+    signal.signal(signal.SIGINT, signal_handler)
+    # threading.Thread(target=run_gdrive_ingestion_loop, daemon=True).start()
 
     if args.runserver:
         app.run(debug=True, use_reloader=False)

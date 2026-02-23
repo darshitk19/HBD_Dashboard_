@@ -63,6 +63,7 @@ class GDriveHighSpeedIngestor:
         # Stats & Heartbeat
         self.stats_lock = threading.Lock()
         self.total_scanned_folders = 0
+        self.total_skipped_folders = 0
         self.total_dispatched_files = 0
 
     def shutdown(self):
@@ -106,7 +107,7 @@ class GDriveHighSpeedIngestor:
             self.folder_registry = {row[0]: row[1] for row in folders}
             
             # Load Token
-            res = conn.execute(text("SELECT meta_value FROM etl_metadata WHERE meta_key='start_page_token'"))
+            res = conn.execute(text("SELECT meta_value FROM etl_metadata WHERE meta_key='last_change_token'"))
             row = res.fetchone()
             if row: self.page_token = row[0] if row else None
 
@@ -188,6 +189,15 @@ class GDriveHighSpeedIngestor:
     def scanner_producer(self, folder_id, folder_name, path=""):
         if self.shutdown_event.is_set(): return
         
+        # Check if folder is already fully processed in db
+        recorded_mod = self.folder_registry.get(folder_id)
+        # If it exists, SKIP the folder entirely to prevent re-scanning 125,000 files
+        if recorded_mod:
+            logger.debug(f"⏭ SKIPPING Folder: {folder_name} (Already indexed)")
+            with self.stats_lock:
+                self.total_skipped_folders += 1
+            return
+            
         # 1. Fetch items
         items = self.list_files(folder_id)
         
@@ -237,8 +247,9 @@ class GDriveHighSpeedIngestor:
             self.total_dispatched_files += folder_dispatched
             
             # Periodic Heartbeat (Every 200 folders)
-            if self.total_scanned_folders % 200 == 0:
-                logger.info(f"⏳ [PROGRESS] Scanned {self.total_scanned_folders} folders | Dispatched {self.total_dispatched_files} files...")
+            total_processed = self.total_scanned_folders + self.total_skipped_folders
+            if total_processed % 200 == 0:
+                logger.info(f"⏳ [PROGRESS] Scanned {self.total_scanned_folders} | Skipped {self.total_skipped_folders} | Dispatched {self.total_dispatched_files} files...")
             
         # Update folder state (Legacy logic, keeping it for now)
         mod_time = datetime.utcnow().isoformat() + "Z"
@@ -264,19 +275,20 @@ class GDriveHighSpeedIngestor:
         # Reset Stats for new run
         with self.stats_lock:
             self.total_scanned_folders = 0
+            self.total_skipped_folders = 0
             self.total_dispatched_files = 0
             
-        # Reset Celery Aggregated Counters in Redis
-        try:
-            r = redis.Redis(host='localhost', port=6379, db=0)
-            r.set('celery_files_processed', 0)
-            r.set('celery_rows_inserted', 0)
-            logger.info("🔄 Redis Counters Reset (files & rows)")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to reset Redis counters: {e}")
-
         # 1. INITIAL FULL SCAN (Only on first start)
         if self.first_run:
+            # Reset Celery Aggregated Counters in Redis ONLY on first startup
+            try:
+                r = redis.Redis(host='localhost', port=6379, db=0)
+                r.set('celery_files_processed', 0)
+                r.set('celery_rows_inserted', 0)
+                logger.info("🔄 Redis Counters Reset (files & rows)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to reset Redis counters: {e}")
+
             logger.info("🎬 Initializing GDrive Orchestrator v6.0 (Celery Mode)...")
             top_folders = [f for f in self.list_files(ROOT_FOLDER_ID) if f['mimeType'] == 'application/vnd.google-apps.folder']
             
@@ -292,6 +304,7 @@ class GDriveHighSpeedIngestor:
             logger.info("="*60)
             logger.info(f"✅ Initial Scan Complete in {time.time() - start_time:.2f}s")
             logger.info(f"   - Total Folders Scanned: {self.total_scanned_folders}")
+            logger.info(f"   - Total Folders Skipped: {self.total_skipped_folders}")
             logger.info(f"   - Total Files Dispatched: {self.total_dispatched_files}")
             logger.info("="*60)
             return

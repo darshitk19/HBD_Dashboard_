@@ -66,6 +66,7 @@ from routes.product_routes.upload_dmart_route import dmart_bp
 from routes.product_routes.upload_flipkart_products_route import flipkart_bp
 from routes.product_routes.upload_india_mart_route import indiamart_bp
 from routes.product_routes.upload_jio_mart_route import jiomart_bp
+from routes.gdrive_etl_routes.validation_dashboard import validation_dashboard_bp
 
 from model.robust_gdrive_etl_v2 import start_background_etl
 import sys
@@ -103,6 +104,7 @@ PUBLIC_ROUTES = [
     "/google-listings",        
     "/listing-master",         
     "/complete-data",
+    "/api/validation/dashboard",
 ]
 
 @app.before_request
@@ -139,6 +141,7 @@ app.register_blueprint(item_csv_download_bp)
 app.register_blueprint(item_duplicate_bp)
 app.register_blueprint(upload_others_csv_bp)
 app.register_blueprint(listing_master_bp, url_prefix="/api")
+app.register_blueprint(validation_dashboard_bp)
 
 # --- Register Listing & Product Blueprints (Batch) ---
 blueprints_listing = [
@@ -163,16 +166,38 @@ def index():
 if __name__ == '__main__':
     print("🔗 Starting Background Sync Thread...")
     ingestor = start_background_etl()
+    
+    # Daemonize the ingestor thread if possible
+    try:
+        if hasattr(ingestor, 'daemon'):
+            ingestor.daemon = True
+    except Exception:
+        pass
 
-    shutdown_called = False
-    def signal_handler(sig, frame):
-        global shutdown_called
-        if not shutdown_called:
-            print('\n🛑 shutdown signal received. Stopping background threads...')
-            if ingestor:
-                ingestor.shutdown()
-            shutdown_called = True
-            sys.exit(0)
+    import gevent
+    from gevent.pywsgi import WSGIServer
 
-    signal.signal(signal.SIGINT, signal_handler)
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    # Create the WSGI Server
+    http_server = WSGIServer(('0.0.0.0', 8001), app)
+
+    def shutdown():
+        print('\n🛑 shutdown signal received. Stopping background threads...')
+        if ingestor:
+            ingestor.shutdown()
+        http_server.stop()
+        print("✅ Shutdown complete.")
+        sys.exit(0)
+
+    # Optional handle for SIGINT if supported
+    import signal
+    try:
+        gevent.signal_handler(signal.SIGINT, shutdown)
+    except AttributeError:
+        # Windows doesn't support gevent.signal_handler, fallback
+        pass
+
+    try:
+        print("🚀 Starting Gevent WSGIServer on port 8001. Press CTRL+C to quit.")
+        http_server.serve_forever()
+    except KeyboardInterrupt:
+        shutdown()

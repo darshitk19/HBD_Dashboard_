@@ -75,11 +75,16 @@ def start_metrics_server(port=None):
         logger.warning("Cannot start metrics server: prometheus-client not installed")
         return False
 
-    port = int(port or os.getenv('PROMETHEUS_PORT', '8000'))
-    try:
-        start_http_server(port)
-        logger.info(f"Prometheus metrics server started on port {port}")
-        return True
-    except OSError as e:
-        logger.warning(f"Could not start metrics server on port {port}: {e}")
-        return False
+    base_port = int(port or os.getenv('PROMETHEUS_PORT', '8000'))
+    
+    for current_port in range(base_port, base_port + 10):
+        try:
+            start_http_server(current_port)
+            logger.info(f"Prometheus metrics server started on port {current_port}")
+            return True
+        except OSError as e:
+            logger.debug(f"Port {current_port} busy ({e}), trying next...")
+            continue
+            
+    logger.warning(f"Could not start metrics server on any port between {base_port} and {base_port + 9}")
+    return False

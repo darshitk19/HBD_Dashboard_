@@ -5,7 +5,7 @@ import api from '../../utils/Api';
 const MasterDataRegistry = () => {
   const [allData, setAllData] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const [nextCursor, setNextCursor] = useState(null);
@@ -25,23 +25,23 @@ const MasterDataRegistry = () => {
     { header: "Virtual Phone", accessor: "virtual_phone" },
     { header: "WhatsApp", accessor: "whatsapp_phone" },
     { header: "Email", accessor: "email" },
-    { 
-      header: "Website", 
+    {
+      header: "Website",
       accessor: "website_url",
       render: (row) => row.website_url ? <a href={row.website_url} target="_blank" rel="noreferrer">Link</a> : "-"
     },
-    { 
-      header: "Facebook", 
+    {
+      header: "Facebook",
       accessor: "facebook_url",
       render: (row) => row.facebook_url ? <a href={row.facebook_url} target="_blank" rel="noreferrer">FB</a> : "-"
     },
-    { 
-      header: "LinkedIn", 
+    {
+      header: "LinkedIn",
       accessor: "linkedin_url",
       render: (row) => row.linkedin_url ? <a href={row.linkedin_url} target="_blank" rel="noreferrer">LI</a> : "-"
     },
-    { 
-      header: "Twitter", 
+    {
+      header: "Twitter",
       accessor: "twitter_url",
       render: (row) => row.twitter_url ? <a href={row.twitter_url} target="_blank" rel="noreferrer">X</a> : "-"
     },
@@ -67,10 +67,6 @@ const MasterDataRegistry = () => {
   ];
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/master_table')
-      .then(res => res.json())
-      .then(data => {
-        setAllData(data);
     setCurrentPage(1);
     setPrevCursors([]);
     fetchData(null, 'init');
@@ -101,7 +97,7 @@ const MasterDataRegistry = () => {
         console.error(err);
         setLoading(false);
       });
-  }, []);
+  };
 
   return (
     <div style={{ padding: '20px' }}>
@@ -116,17 +112,16 @@ const MasterDataRegistry = () => {
       {loading ? (
         <p>Fetching massive dataset...</p>
       ) : (
-        <ReusableTable columns={columns} data={allData} />
         <>
           <ReusableTable columns={columns} data={allData} />
-          
+
           {/* PAGINATION CONTROLS */}
-          <div style={{ 
-            marginTop: '20px', 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            gap: '15px' 
+          <div style={{
+            marginTop: '20px',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '15px'
           }}>
             <button
               disabled={currentPage === 1 || prevCursors.length === 0}

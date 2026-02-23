@@ -108,6 +108,8 @@ import ZeptoUploader from "./componunts/data import/product import/ZeptoUploader
 import { ScraperManager } from "./layouts/Scrapper_manager";
 import ZomatoUploader from "./componunts/data import/product import/ZomatoUploader";
 import RawCleanedData from "./componunts/masterdata/RawCleanedData";
+import ValidationDashboard from "./componunts/masterdata/ValidationDashboard";
+import ValidationReport from "./componunts/masterdata/ValidationReport";
 
 const icon = {
   className: "w-5 h-5 text-inherit",
@@ -429,6 +431,18 @@ export const routes = [
             name: "Raw Cleaned Data",
             path: "/masterdata/raw-cleaned-data",
             element: <RawCleanedData />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Validation Dashboard",
+            path: "/masterdata/validation-dashboard",
+            element: <ValidationDashboard />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Validation Report",
+            path: "/masterdata/validation-report",
+            element: <ValidationReport />,
           }
         ],
       },

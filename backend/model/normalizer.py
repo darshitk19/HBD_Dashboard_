@@ -151,6 +151,16 @@ class UniversalNormalizer:
         return float(match.group()) if match else 0.0
 
     @staticmethod
+    def normalize_date(val):
+        """Standardize ISO 8601 dates for MySQL DATETIME."""
+        if not val: return None
+        val_str = str(val).strip()
+        if 'T' in val_str:
+            # Convert 2024-02-26T10:00:00.000Z -> 2024-02-26 10:00:00
+            val_str = val_str.replace('T', ' ').replace('Z', '').split('.')[0]
+        return val_str
+
+    @staticmethod
     def get_fuzzy(row, canonical_key):
         """🔍 Smart header mapping for multilingual CSVs."""
         # Common variations for Indian data headers
@@ -201,7 +211,7 @@ class UniversalNormalizer:
             "drive_file_id": row.get("drive_file_id"),
             "drive_file_name": row.get("drive_file_name"),
             "drive_file_path": row.get("drive_file_path"),
-            "drive_uploaded_time": row.get("drive_uploaded_time"),
+            "drive_uploaded_time": cls.normalize_date(row.get("drive_uploaded_time")),
         }
 
     @classmethod
@@ -224,5 +234,5 @@ class UniversalNormalizer:
             "drive_file_id": row.get("drive_file_id"),
             "drive_file_name": row.get("drive_file_name"),
             "drive_file_path": row.get("drive_file_path"),
-            "drive_uploaded_time": row.get("drive_uploaded_time"),
+            "drive_uploaded_time": cls.normalize_date(row.get("drive_uploaded_time")),
         }

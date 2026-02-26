@@ -17,12 +17,12 @@ engine = create_engine(DATABASE_URL)
 try:
     with engine.connect() as conn:
         print("--- Table Structure ---")
-        res = conn.execute(text("DESCRIBE raw_google_map_filewise"))
+        res = conn.execute(text("DESCRIBE raw_google_map_drive_data"))
         for row in res:
             print(row)
         
         print("\n--- Indexes ---")
-        res = conn.execute(text("SHOW INDEX FROM raw_google_map_filewise"))
+        res = conn.execute(text("SHOW INDEX FROM raw_google_map_drive_data"))
         for row in res:
             print(f"Index: {row[2]}, Column: {row[4]}")
             

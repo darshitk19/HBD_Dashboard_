@@ -20,6 +20,8 @@ class Config:
     )
     
     SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_size": 20,
+        "max_overflow": 10,
         "pool_recycle": 280,
         "pool_pre_ping": True, # Checks if DB is alive before the query
     }

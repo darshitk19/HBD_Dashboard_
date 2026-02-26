@@ -17,7 +17,7 @@ engine = create_engine(DATABASE_URL)
 try:
     with engine.connect() as conn:
         print("--- State Distribution ---")
-        res = conn.execute(text("SELECT state, COUNT(*) FROM raw_google_map_filewise GROUP BY state LIMIT 50"))
+        res = conn.execute(text("SELECT state, COUNT(*) FROM raw_google_map_drive_data GROUP BY state LIMIT 50"))
         for row in res:
             print(f"[{repr(row[0])}] : {row[1]} rows")
             

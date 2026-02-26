@@ -31,11 +31,11 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,
     future=True,
-    pool_size=30,
-    max_overflow=20,
-    pool_timeout=10,
+    pool_size=10,
+    max_overflow=5,
+    pool_timeout=30,
     pool_pre_ping=True,    
-    pool_recycle=3600       
+    pool_recycle=1800       
 )
 
 # Session Factory

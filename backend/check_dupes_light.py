@@ -3,10 +3,11 @@ import os
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
+import urllib.parse
 load_dotenv()
 
 DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASSWORD')
+DB_PASS = urllib.parse.quote_plus(os.getenv('DB_PASSWORD') or "")
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 
@@ -22,7 +23,7 @@ with engine.connect() as conn:
     
     sample = conn.execute(text("""
         SELECT COUNT(*) as total, COUNT(DISTINCT CONCAT(COALESCE(name,''), '|', COALESCE(phone_number,''))) as unique_combos 
-        FROM (SELECT name, phone_number FROM raw_google_map_filewise LIMIT 100000) sub
+        FROM (SELECT name, phone_number FROM raw_google_map_drive_data LIMIT 100000) sub
     """)).fetchone()
     
     total_sample = sample[0]

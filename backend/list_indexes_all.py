@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASSWORD') 
+DB_PASS = quote_plus(os.getenv('DB_PASSWORD') or "") 
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 DB_PORT = os.getenv('DB_PORT', '3306')
@@ -16,11 +16,11 @@ engine = create_engine(DATABASE_URL)
 
 try:
     with engine.connect() as conn:
-        print("Detailed Index List:")
-        res = conn.execute(text("SHOW INDEX FROM raw_google_map_filewise")).fetchall()
+        print("Detailed Index List for raw_google_map_drive_data:")
+        res = conn.execute(text("SHOW INDEX FROM raw_google_map_drive_data")).fetchall()
         for r in res:
-            # Index name is at 2
-            print(f"- {r[2]}")
+            # Index name is at index 2 of the result row
+            print(f"- {r[2]} (Column: {r[4]})")
             
 except Exception as e:
     print(f"Error: {e}")

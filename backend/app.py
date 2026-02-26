@@ -1,6 +1,13 @@
 from gevent import monkey
 monkey.patch_all()
 import os
+import sys
+
+# Windows console encoding fix
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import verify_jwt_in_request
@@ -187,16 +194,24 @@ if __name__ == '__main__':
 
     # --- Live Terminal Monitor (30s interval) ---
     def count_monitor():
-        from sqlalchemy import text
+        from sqlalchemy import create_engine, text
+        # Use a separate lightweight engine for monitoring only
+        monitor_engine = create_engine(
+            app.config['SQLALCHEMY_DATABASE_URI'],
+            pool_size=1, max_overflow=0, pool_pre_ping=True, pool_recycle=1800
+        )
         while True:
             try:
-                with app.app_context():
-                    raw = db.session.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).fetchone()[0]
-                    clean = db.session.execute(text("SELECT COUNT(*) FROM raw_clean_google_map_data")).fetchone()[0]
-                    master = db.session.execute(text("SELECT COUNT(*) FROM g_map_master_table")).fetchone()[0]
-                    print(f"📊 [LIVE STATUS] Raw: {raw:,} | Clean: {clean:,} | Master (G-Map): {master:,}")
+                with monitor_engine.connect() as conn:
+                    raw = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).fetchone()[0]
+                    clean = conn.execute(text("SELECT COUNT(*) FROM raw_clean_google_map_data")).fetchone()[0]
+                    master = conn.execute(text("SELECT COUNT(*) FROM g_map_master_table")).fetchone()[0]
+                    msg = f"\n{'='*60}\n  [LIVE STATUS]  Raw: {raw:,}  |  Clean: {clean:,}  |  Master: {master:,}\n{'='*60}\n"
+                    sys.stderr.write(msg)
+                    sys.stderr.flush()
             except Exception as e:
-                print(f"⚠️ Monitor Error: {e}")
+                sys.stderr.write(f"\n  Monitor Error: {e}\n")
+                sys.stderr.flush()
             gevent.sleep(30)
 
     import gevent

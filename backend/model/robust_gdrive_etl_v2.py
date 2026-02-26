@@ -48,7 +48,8 @@ class GDriveHighSpeedIngestor:
     def __init__(self):
         self.creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/drive.readonly'])
         # Producer uses a standard pool since it's threaded, not gevent
-        self.engine = create_engine(DATABASE_URI, pool_size=35, max_overflow=25, pool_pre_ping=True, pool_recycle=3600, isolation_level="READ COMMITTED")
+        # Reduced pool size to save memory on 3.5GB systems
+        self.engine = create_engine(DATABASE_URI, pool_size=10, max_overflow=5, pool_pre_ping=True, pool_recycle=1800, pool_timeout=30, isolation_level="READ COMMITTED")
         self.table_name = "raw_google_map_drive_data"
         self.task_queue = queue.Queue(maxsize=100)
         self.folder_registry = {}  # Changed to Dict {folder_id: modified_time}
@@ -276,8 +277,8 @@ class GDriveHighSpeedIngestor:
             logger.info("🎬 Initializing GDrive Orchestrator v6.0 (Celery Mode)...")
             top_folders = [f for f in self.list_files(ROOT_FOLDER_ID) if f['mimeType'] == 'application/vnd.google-apps.folder']
             
-            # We still use a ThreadPool for SCANNING (iterating folders), but not for processing
-            with ThreadPoolExecutor(max_workers=32) as executor:
+            # Reduced workers for scanning to avoid overhead.
+            with ThreadPoolExecutor(max_workers=8) as executor:
                 futures = [executor.submit(self.scanner_producer, f['id'], f['name'], "ROOT") for f in top_folders]
                 for f in as_completed(futures): pass
                 self.scanners_finished.set()
@@ -346,14 +347,53 @@ class GDriveHighSpeedIngestor:
 
 class ValidationQualityProcessor:
     """
-    🛡️ Continuous Validation, Cleaning & Master Sync Layer
+    Continuous Validation, Cleaning & Master Sync Layer
     Processes raw_google_map_drive_data -> raw_clean_google_map_data & master_table
     Ensures zero data loss, applying robust validation, normalization, and deduplication.
     """
     def __init__(self, engine, shutdown_event):
         self.engine = engine
         self.shutdown_event = shutdown_event
-        self.batch_size = 20000 # 🚀 Turbo: Process 20k rows per cycle (Up from 10k)
+        self.batch_size = 2000 # Smaller batch for stability
+        self.consecutive_errors = 0
+        self.max_backoff = 60  # Max sleep on consecutive errors
+
+    @staticmethod
+    def safe_str(val, default=""):
+        """Safe string conversion that never throws."""
+        if val is None:
+            return default
+        try:
+            s = str(val).strip()
+            return default if s.lower() in ('nan', 'none', 'nat', '') else s
+        except Exception:
+            return default
+
+    @staticmethod
+    def safe_int(val, default=0):
+        """Safe int conversion that never throws."""
+        try:
+            if val is None: return default
+            s = str(val).strip()
+            if s.lower() in ('', 'nan', 'none', 'nat'): return default
+            import re as _re
+            m = _re.search(r'\d+', s)
+            return int(m.group()) if m else default
+        except Exception:
+            return default
+
+    @staticmethod
+    def safe_float(val, default=0.0):
+        """Safe float conversion that never throws."""
+        try:
+            if val is None: return default
+            s = str(val).strip()
+            if s.lower() in ('', 'nan', 'none', 'nat'): return default
+            import re as _re
+            m = _re.search(r'[-+]?\d*\.?\d+', s)
+            return float(m.group()) if m else default
+        except Exception:
+            return default
 
     def get_last_processed_id(self):
         try:
@@ -380,7 +420,7 @@ class ValidationQualityProcessor:
                     ON DUPLICATE KEY UPDATE meta_value = :val
                 """), {"val": str(last_id)})
         except Exception as e:
-            logger.error(f"Failed to update last_processed_id: {e}")
+            logger.warning(f"Failed to update last_processed_id: {e}")
 
     def log_validation_batch(self, summary):
         try:
@@ -391,53 +431,49 @@ class ValidationQualityProcessor:
                     VALUES (:total, :missing, :valid, :duplicate, :cleaned, :last_id, NOW())
                 """), summary)
         except Exception as e:
-            logger.error(f"Failed to log validation batch: {e}")
+            logger.warning(f"Failed to log validation batch: {e}")
 
     def is_missing(self, val):
         return val is None or str(val).strip() == ""
 
     def validate_row(self, row):
-        # Mandatory fields for STRUCTURED check (Multilingual Safe)
-        mandatory_fields = ["name", "address", "phone_number", "city", "state", "category"]
-        missing = [f for f in mandatory_fields if self.is_missing(row.get(f))]
-        
-        is_structured = len(missing) == 0
-        
-        # Format checks for VALID check
-        invalid_fields = []
-        
-        # Phone (Phase 7): Numeric only, 8-18 digits
-        raw_phone = str(row.get('phone_number', '') or '')
-        clean_phone = re.sub(r'\D', '', raw_phone)
-        if not (self.is_missing(clean_phone)) and not re.match(r'^\d{8,18}$', clean_phone):
-            invalid_fields.append("phone_number")
-        elif self.is_missing(clean_phone):
-            if "phone_number" not in missing:
-                missing.append("phone_number")
+        """Validate a single row. Never throws."""
+        try:
+            mandatory_fields = ["name", "address", "phone_number", "city", "state", "category"]
+            missing = [f for f in mandatory_fields if self.is_missing(row.get(f))]
             
-        # Website: Must contain "." if present
-        website = str(row.get('website', '') or '').strip()
-        if website and '.' not in website:
-            invalid_fields.append("website")
+            is_structured = len(missing) == 0
+            invalid_fields = []
             
-        is_valid = len(invalid_fields) == 0 and is_structured
-        
-        return is_structured, is_valid, missing, invalid_fields, clean_phone
+            # Phone: Numeric only, 8-18 digits
+            raw_phone = self.safe_str(row.get('phone_number', ''))
+            clean_phone = re.sub(r'\D', '', raw_phone)
+            if clean_phone and not re.match(r'^\d{8,18}$', clean_phone):
+                invalid_fields.append("phone_number")
+            elif not clean_phone:
+                if "phone_number" not in missing:
+                    missing.append("phone_number")
+                
+            # Website: Must contain "." if present
+            website = self.safe_str(row.get('website', ''))
+            if website and '.' not in website:
+                invalid_fields.append("website")
+                
+            is_valid = len(invalid_fields) == 0 and is_structured
+            return is_structured, is_valid, missing, invalid_fields, clean_phone
+        except Exception:
+            return False, False, ["unknown"], [], ""
 
     def check_duplicates_batch(self, signatures, conn):
-        """Batch check signatures against the clean table."""
-        """
-        Fast hash-based duplicate check against raw_clean_google_map_data.
-        Uses 4-field signature: (phone, name, address, city)
-        """
+        """Batch check signatures against the clean table. Never throws."""
         if not signatures:
             return set()
         
         results = set()
         sig_list = list(signatures)
         
-        for i in range(0, len(sig_list), 5000): # 🚀 Turbo: Larger sub-batches (5k)
-            batch = sig_list[i:i+5000]
+        for i in range(0, len(sig_list), 500):
+            batch = sig_list[i:i+500]
             conditions = []
             params = {}
             for idx, (phone, name, addr, city) in enumerate(batch):
@@ -460,17 +496,16 @@ class ValidationQualityProcessor:
                 for r in rows:
                     results.add((str(r[1]), str(r[0]), str(r[2]), str(r[3])))
             except Exception as e:
-                logger.warning(f"Duplicate check sub-batch failed: {e}")
+                logger.warning(f"Duplicate check sub-batch failed (non-fatal): {e}")
         return results
 
     def start_pipeline(self):
-        """Main loop for the quality assurance and master sync thread."""
+        """Main loop for the quality assurance and master sync thread. NEVER exits on error."""
         last_id = self.get_last_processed_id()
-        logger.info(f"🛡️ Data Quality Processor Started from ID: {last_id}")
+        logger.info(f"Data Quality Processor Started from ID: {last_id}")
         
         while not self.shutdown_event.is_set():
             try:
-                # Use a SINGLE connection for the entire cycle (fetch + check + write)
                 with self.engine.begin() as conn:
                     # READ UNCOMMITTED: prevents locking raw table during read
                     conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
@@ -488,138 +523,157 @@ class ValidationQualityProcessor:
                 
                     if not rows:
                         conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+                        self.consecutive_errors = 0  # Reset on successful idle
                         if self.shutdown_event.wait(timeout=10):
                             break
                         continue
 
                     batch_summary = {
-                        "total": 0,
-                        "missing": 0,
-                        "valid": 0,
-                        "duplicate": 0,
-                        "cleaned": 0
+                        "total": 0, "missing": 0, "valid": 0,
+                        "duplicate": 0, "cleaned": 0
                     }
                     
                     current_max_id = last_id
-                    
-                    # 2. Process batch in memory with FULL NORMALIZATION
                     clean_data_batch = []
                     master_data_batch = []
-                    
                     batch_rows = []
                     signatures = set()
                     
+                    # 2. Process batch — each row is individually protected
                     for row_obj in rows:
-                        # Convert to dict and apply FULL Normalization first (as per user request)
-                        raw_row = row_obj._asdict() if hasattr(row_obj, '_asdict') else row_obj._mapping
-                        norm_row = UniversalNormalizer.normalize_row_full(dict(raw_row))
-                        norm_row['id'] = raw_row['id'] # Preserve original ID for tracking
-                        
-                        batch_rows.append(norm_row)
-                        current_max_id = max(current_max_id, norm_row['id'])
-                        
-                        # Pre-calculate signatures for bulk duplicate check (Normalized)
-                        sig = (norm_row['phone_number'], norm_row['name'].lower(), norm_row['address'].lower(), norm_row['city'].lower())
-                        signatures.add(sig)
+                        try:
+                            raw_row = row_obj._asdict() if hasattr(row_obj, '_asdict') else row_obj._mapping
+                            norm_row = UniversalNormalizer.normalize_row_full(dict(raw_row))
+                            norm_row['id'] = raw_row['id']
+                            
+                            # Ensure all string fields are safe
+                            for key in ['name', 'address', 'website', 'phone_number', 'category', 'subcategory', 'city', 'state', 'area']:
+                                norm_row[key] = self.safe_str(norm_row.get(key))
+                            norm_row['reviews_count'] = self.safe_int(norm_row.get('reviews_count'))
+                            norm_row['reviews_average'] = self.safe_float(norm_row.get('reviews_average'))
+                            
+                            batch_rows.append(norm_row)
+                            current_max_id = max(current_max_id, norm_row['id'])
+                            
+                            sig = (norm_row['phone_number'], norm_row['name'].lower(), norm_row['address'].lower(), norm_row['city'].lower())
+                            signatures.add(sig)
+                        except Exception as row_err:
+                            # Skip bad row, advance cursor past it
+                            try:
+                                current_max_id = max(current_max_id, raw_row['id'])
+                            except Exception:
+                                pass
+                            logger.warning(f"Row normalization failed (skipping): {str(row_err)[:100]}")
+                            continue
 
-                    # Bulk Duplicate Check (against Clean Table)
+                    # Bulk Duplicate Check
                     existing_sigs = self.check_duplicates_batch(signatures, conn)
                     
                     # Switch back to safe mode for writes
                     conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
 
                     for row in batch_rows:
-                        batch_summary["total"] += 1
-                        
-                        # Apply Validation Logic on Normalized Data
-                        is_structured, is_valid, missing_list, invalid_list, clean_phone = self.validate_row(row)
-                        
-                        sig = (row['phone_number'], row['name'].lower(), row['address'].lower(), row['city'].lower())
-                        is_duplicate = sig in existing_sigs if is_structured else False
-
-                        # Determine status
-                        status = "VALID"
-                        if not is_structured: 
-                            status = "MISSING"
-                            batch_summary["missing"] += 1
-                        elif is_duplicate: 
-                            status = "DUPLICATE"
-                            batch_summary["duplicate"] += 1
-                        elif not is_valid: 
-                            status = "INVALID"
-                        else:
-                            batch_summary["valid"] += 1
-
-                        # 3. Track statistics only (Audit table removed)
-                        # No audit insertion per user request
-
-                        # 4. Queue for Clean & Master (If successful OR error-tracking for clean table)
-                        if status in ["VALID", "MISSING", "INVALID", "DUPLICATE"]:
-                            clean_data_batch.append({
-                                "raw_id": row['id'], "name": row['name'], "address": row['address'],
-                                "website": row['website'], "phone": row['phone_number'], 
-                                "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
-                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
-                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now(),
-                                "val_status": status, 
-                                "clean_status": "CLEANED" if status == "VALID" else "FAILED_VALIDATION" if status != "DUPLICATE" else "DUPLICATE_FOUND", 
-                                "missing": ",".join(missing_list) if missing_list else None, 
-                                "invalid": ",".join(invalid_list) if invalid_list else None, 
-                                "duplicate_reason": "Exact match (Phone, Name, Address, City)" if status == "DUPLICATE" else None, 
-                                "processed_at": datetime.now()
-                            })
+                        try:
+                            batch_summary["total"] += 1
                             
-                            # ONLY Valid rows go to Master
-                            if status == "VALID":
-                                master_data_batch.append({
-                                    "name": row['name'],
-                                    "address": row['address'],
-                                    "website": row['website'],
-                                    "phone_number": row['phone_number'],
-                                    "reviews_count": int(row.get('reviews_count', 0)),
-                                    "reviews_avg": float(row.get('reviews_average', 0.00)),
-                                    "category": row['category'],
-                                    "subcategory": row['subcategory'],
-                                    "city": row['city'],
-                                    "state": row['state'],
-                                    "area": row['area'],
-                                    "created_at": row.get('created_at') or datetime.now()
+                            is_structured, is_valid, missing_list, invalid_list, clean_phone = self.validate_row(row)
+                            
+                            sig = (row['phone_number'], row['name'].lower(), row['address'].lower(), row['city'].lower())
+                            is_duplicate = sig in existing_sigs if is_structured else False
+
+                            status = "VALID"
+                            if not is_structured: 
+                                status = "MISSING"
+                                batch_summary["missing"] += 1
+                            elif is_duplicate: 
+                                status = "DUPLICATE"
+                                batch_summary["duplicate"] += 1
+                            elif not is_valid: 
+                                status = "INVALID"
+                            else:
+                                batch_summary["valid"] += 1
+
+                            if status in ["VALID", "MISSING", "INVALID", "DUPLICATE"]:
+                                created_at = row.get('created_at')
+                                if not created_at:
+                                    created_at = datetime.now()
+                                
+                                clean_data_batch.append({
+                                    "raw_id": row['id'], "name": row['name'], "address": row['address'],
+                                    "website": row['website'], "phone": row['phone_number'], 
+                                    "reviews": self.safe_int(row.get('reviews_count', 0)),
+                                    "avg": self.safe_float(row.get('reviews_average', 0.00)),
+                                    "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
+                                    "state": row['state'], "area": row['area'], "created": created_at,
+                                    "val_status": status, 
+                                    "clean_status": "CLEANED" if status == "VALID" else "FAILED_VALIDATION" if status != "DUPLICATE" else "DUPLICATE_FOUND", 
+                                    "missing": ",".join(missing_list) if missing_list else None, 
+                                    "invalid": ",".join(invalid_list) if invalid_list else None, 
+                                    "duplicate_reason": "Exact match (Phone, Name, Address, City)" if status == "DUPLICATE" else None, 
+                                    "processed_at": datetime.now()
                                 })
-                                batch_summary["cleaned"] += 1
+                                
+                                if status == "VALID":
+                                    master_data_batch.append({
+                                        "name": row['name'],
+                                        "address": row['address'],
+                                        "website": row['website'],
+                                        "phone_number": row['phone_number'],
+                                        "reviews_count": self.safe_int(row.get('reviews_count', 0)),
+                                        "reviews_avg": self.safe_float(row.get('reviews_average', 0.00)),
+                                        "category": row['category'],
+                                        "subcategory": row['subcategory'],
+                                        "city": row['city'],
+                                        "state": row['state'],
+                                        "area": row['area'],
+                                        "created_at": created_at
+                                    })
+                                    batch_summary["cleaned"] += 1
+                        except Exception as row_err:
+                            logger.warning(f"Row validation failed (skipping): {str(row_err)[:100]}")
+                            continue
 
-                    # 4. Execute Batch Writes (Clean & Master ONLY)
-
+                    # 4. Execute Batch Writes — each INSERT is individually protected
                     if clean_data_batch:
-                        conn.execute(text("""
-                            INSERT IGNORE INTO raw_clean_google_map_data 
-                            (raw_id, name, address, website, phone_number, reviews_count, reviews_avg,
-                             category, subcategory, city, state, area, created_at,
-                             validation_status, cleaning_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at)
-                            VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created,
-                                    :val_status, :clean_status, :missing, :invalid, :duplicate_reason, :processed_at)
-                        """), clean_data_batch)
+                        try:
+                            conn.execute(text("""
+                                INSERT IGNORE INTO raw_clean_google_map_data 
+                                (raw_id, name, address, website, phone_number, reviews_count, reviews_avg,
+                                 category, subcategory, city, state, area, created_at,
+                                 validation_status, cleaning_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at)
+                                VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created,
+                                        :val_status, :clean_status, :missing, :invalid, :duplicate_reason, :processed_at)
+                            """), clean_data_batch)
+                        except Exception as e:
+                            logger.warning(f"Clean table batch insert failed (non-fatal): {str(e)[:200]}")
                         
                     if master_data_batch:
-                        conn.execute(text("""
-                            INSERT IGNORE INTO g_map_master_table 
-                            (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                            VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
-                        """), master_data_batch)
+                        try:
+                            conn.execute(text("""
+                                INSERT IGNORE INTO g_map_master_table 
+                                (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
+                                VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
+                            """), master_data_batch)
+                        except Exception as e:
+                            logger.warning(f"Master table batch insert failed (non-fatal): {str(e)[:200]}")
 
-                # 6. Finalize batch
+                # 5. Finalize batch — ALWAYS advance the cursor
                 batch_summary['last_id'] = current_max_id
                 self.update_last_processed_id(current_max_id)
                 self.log_validation_batch(batch_summary)
                 last_id = current_max_id
+                self.consecutive_errors = 0  # Reset on success
                 
-                logger.info(f"🛡️ Quality Cycle Complete: Processed {batch_summary['total']} rows. Last ID: {last_id}")
+                logger.info(f"Quality Cycle Complete: Processed {batch_summary['total']} | Valid: {batch_summary['valid']} | Missing: {batch_summary['missing']} | Dup: {batch_summary['duplicate']} | Master: {batch_summary['cleaned']} | Last ID: {last_id}")
 
             except Exception as e:
+                self.consecutive_errors += 1
+                backoff = min(self.consecutive_errors * 5, self.max_backoff)
                 msg = str(e)
                 if "[parameters:" in msg:
-                    msg = msg.split("[parameters:")[0] + " [Parameters hidden]"
-                logger.error(f"🛡️ Validation Loop Error: {msg.strip()}")
-                if self.shutdown_event.wait(timeout=10):
+                    msg = msg.split("[parameters:")[0] + " [Params hidden]"
+                logger.warning(f"Validation Loop Error (retry in {backoff}s, attempt #{self.consecutive_errors}): {msg[:200]}")
+                if self.shutdown_event.wait(timeout=backoff):
                     break
 
 def get_engine():

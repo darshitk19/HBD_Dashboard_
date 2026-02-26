@@ -19,9 +19,10 @@ creds = service_account.Credentials.from_service_account_file(
 )
 service = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
+import urllib.parse
 # --- Database Setup ---
 DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASSWORD')
+DB_PASS = urllib.parse.quote_plus(os.getenv('DB_PASSWORD') or "")
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
@@ -57,12 +58,12 @@ print(f"✅ Google Drive: {total_drive_csvs} CSV files found")
 # --- Step 2: Count distinct file_ids in database ---
 with engine.connect() as conn:
     db_file_ids = set()
-    res = conn.execute(text("SELECT DISTINCT file_id FROM raw_google_map_filewise")).fetchall()
+    res = conn.execute(text("SELECT DISTINCT drive_file_id FROM raw_google_map_drive_data")).fetchall()
     db_file_ids = {row[0] for row in res if row[0]}
     total_db_files = len(db_file_ids)
     
     # Total rows
-    row_count = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_filewise")).scalar()
+    row_count = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).scalar()
 
 print(f"✅ Database: {total_db_files} unique files ingested ({row_count:,} total rows)")
 

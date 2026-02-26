@@ -1,7 +1,7 @@
 import requests
 import json
 
-base_url = "http://localhost:5000/api/dashboard"
+base_url = "http://localhost:8001/api"
 
 def check_api(endpoint):
     try:

@@ -1,22 +1,24 @@
 """
-Safely removes duplicate rows from raw_google_map_filewise.
+Safely removes duplicate rows from raw_google_map_drive_data.
 Strategy: Delete in batches, keeping the row with the LOWEST id for each unique (name, phone_number, city, state).
-Uses batch processing to avoid connection timeouts on 13.5M rows.
+Uses batch processing to avoid connection timeouts.
 """
 import os
 import time
+import urllib.parse
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASSWORD')
+DB_PASS = urllib.parse.quote_plus(os.getenv('DB_PASSWORD') or "")
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
+DB_PORT = os.getenv('DB_PORT', '3306')
 
 engine = create_engine(
-    f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}",
+    f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
     connect_args={'read_timeout': 600, 'write_timeout': 600}
 )
 
@@ -25,7 +27,7 @@ BATCH_SIZE = 50000  # Delete 50k duplicates per batch
 def get_count():
     with engine.connect() as conn:
         conn.execute(text("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
-        return conn.execute(text("SELECT COUNT(*) FROM raw_google_map_filewise")).scalar()
+        return conn.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).scalar()
 
 print("=" * 60)
 print("  DATABASE DEDUPLICATION")
@@ -49,10 +51,10 @@ while True:
             # Find duplicate IDs to delete in this batch
             # This keeps the MIN(id) and marks all others for deletion
             result = conn.execute(text(f"""
-                DELETE t1 FROM raw_google_map_filewise t1
+                DELETE t1 FROM raw_google_map_drive_data t1
                 INNER JOIN (
                     SELECT MIN(id) as keep_id, name, phone_number, city, state
-                    FROM raw_google_map_filewise
+                    FROM raw_google_map_drive_data
                     WHERE name IS NOT NULL
                     GROUP BY name, phone_number, city, state
                     HAVING COUNT(*) > 1

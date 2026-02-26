@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASSWORD') 
+DB_PASS = quote_plus(os.getenv('DB_PASSWORD') or "") 
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 DB_PORT = os.getenv('DB_PORT', '3306')
@@ -16,7 +16,7 @@ engine = create_engine(DATABASE_URL)
 
 try:
     with engine.connect() as conn:
-        res = conn.execute(text("SHOW CREATE TABLE raw_google_map_filewise")).fetchone()
+        res = conn.execute(text("SHOW CREATE TABLE raw_google_map_drive_data")).fetchone()
         print(res[1])
             
 except Exception as e:

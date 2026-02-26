@@ -19,7 +19,7 @@ try:
     with engine.connect() as conn:
         print("Timing SELECT DISTINCT state...")
         start = time.time()
-        res = conn.execute(text("SELECT DISTINCT state FROM raw_google_map_filewise WHERE state IS NOT NULL AND state != ''")).fetchall()
+        res = conn.execute(text("SELECT DISTINCT state FROM raw_google_map_drive_data WHERE state IS NOT NULL AND state != ''")).fetchall()
         print(f"DONE. Took {time.time()-start:.2f}s")
         print(f"States found: {len(res)}")
         for r in res[:10]:

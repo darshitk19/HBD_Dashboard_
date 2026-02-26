@@ -17,15 +17,15 @@ engine = create_engine(DATABASE_URL)
 try:
     with engine.connect() as conn:
         print("Checking indexes...")
-        res = conn.execute(text("SHOW INDEX FROM raw_google_map_filewise"))
+        res = conn.execute(text("SHOW INDEX FROM raw_google_map_drive_data"))
         for row in res:
             print(f"Table: {row[0]}, Non_unique: {row[1]}, Key_name: {row[2]}, Column: {row[4]}")
         
         print("\nChecking row count...")
-        # Get count from metadata (approximation) if possible, or just time it
+        # Get count
         import time
         start = time.time()
-        res = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_filewise"))
+        res = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data"))
         count = res.scalar()
         print(f"Count: {count} (took {time.time()-start:.2f}s)")
 

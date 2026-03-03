@@ -57,8 +57,8 @@ def check_mandatory(row):
 def validate_formats(row):
     invalid_fields = []
     
-    # Phone: 10-15 digits
-    phone = re.sub(r'\D', '', str(row.get('phone_number', '')))
+    # Phone: 10-15 digits after normalization (strips 0/91)
+    phone = normalize_phone(row.get('phone_number', ''))
     if not (10 <= len(phone) <= 15):
         invalid_fields.append("phone_number")
         
@@ -83,7 +83,12 @@ def normalize_text(text):
     return str(text).lower().strip()
 
 def normalize_phone(phone):
-    return re.sub(r'\D', '', str(phone) if phone else "")
+    if not phone: return ""
+    s = re.sub(r'\D', '', str(phone))
+    s = s.lstrip('0')
+    if len(s) == 12 and s.startswith('91'):
+        s = s[2:]
+    return s
 
 # ---------------- CORE PIPELINE ---------------- #
 

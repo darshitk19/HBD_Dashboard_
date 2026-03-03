@@ -202,8 +202,16 @@ class GDriveHighSpeedIngestor:
         folder_skipped = 0
         folder_dispatched = 0
         
-        for item in csv_files:
+        # Import task ONCE out of the loop
+        from tasks.gdrive_task.etl_tasks import process_csv_task
+        import gevent
+        
+        for idx, item in enumerate(csv_files):
             if self.shutdown_event.is_set(): break
+            
+            # Periodically yield to gevent hub every 100 files
+            if idx % 100 == 0:
+                gevent.sleep(0) # Let the hub handle heartbeats
             
             # High-Speed Change Detection (Phase 3) using Cached Registry
             current_hash = self.get_file_hash(item['id'], item.get('modifiedTime', ''))
@@ -211,12 +219,16 @@ class GDriveHighSpeedIngestor:
             existing_hash = cached.get('hash')
             status = cached.get('status')
             
-            if status == 'PROCESSED' and existing_hash == current_hash:
+            # FIX: Skip files that are already PROCESSED OR in-progress/errored with same hash
+            if status == 'PROCESSED':
+                folder_skipped += 1
+                continue
+            
+            if status in ('IN_PROGRESS', 'ERROR') and existing_hash == current_hash:
                 folder_skipped += 1
                 continue
                 
-            # New, Modified, or Partial file -> Dispatch (Phase 2 & 3)
-            from tasks.gdrive_task.etl_tasks import process_csv_task
+            # New, Modified, or stale IN_PROGRESS with new hash -> Dispatch
             process_csv_task.delay(
                 file_id=item['id'], 
                 file_name=item['name'],
@@ -297,7 +309,7 @@ class GDriveHighSpeedIngestor:
         # 2. REACTIVE TARGETED SYNC
         changes = self.get_changes()
         if not changes:
-            logger.info("⚡ System Idle... No new changes detected.")
+            logger.info("✅ DRIVE SYNC COMPLETE: All files up-to-date. (Watching for changes...)")
             return
 
         logger.info(f"🚀 Reactive Trigger! Disptaching {len(changes)} updates to Celery...")
@@ -342,7 +354,7 @@ class GDriveHighSpeedIngestor:
                     executor.submit(self.scanner_producer, f['id'], f['name'], "REACTIVE")
             
         self.save_change_token(self.page_token)
-        logger.info(f"✨ Reactive Cycle dispatched in {time.time() - start_time:.2f}s")
+        logger.info(f"✨ DRIVE DISPATCH FINISHED: Tasks sent to workers for {len(changes)} items.")
 
 
 class ValidationQualityProcessor:
@@ -445,14 +457,18 @@ class ValidationQualityProcessor:
             is_structured = len(missing) == 0
             invalid_fields = []
             
-            # Phone: Numeric only, 8-18 digits
+            # Phone: Normalize (strip 0/91) and check length
             raw_phone = self.safe_str(row.get('phone_number', ''))
-            clean_phone = re.sub(r'\D', '', raw_phone)
+            clean_phone = UniversalNormalizer.normalize_phone(raw_phone)
             if clean_phone and not re.match(r'^\d{8,18}$', clean_phone):
                 invalid_fields.append("phone_number")
             elif not clean_phone:
                 if "phone_number" not in missing:
                     missing.append("phone_number")
+
+            # Address: Check if it's purely numerical junk
+            if UniversalNormalizer.is_numerical_address(row.get('address')):
+                invalid_fields.append("address")
                 
             # Website: Must contain "." if present
             website = self.safe_str(row.get('website', ''))
@@ -464,39 +480,24 @@ class ValidationQualityProcessor:
         except Exception:
             return False, False, ["unknown"], [], ""
 
-    def check_duplicates_batch(self, signatures, conn):
-        """Batch check signatures against the clean table. Never throws."""
-        if not signatures:
+    def check_duplicates_batch(self, hashes, conn):
+        """Batch check signature hashes against the clean table. Never throws."""
+        if not hashes:
             return set()
         
         results = set()
-        sig_list = list(signatures)
+        hash_list = list(hashes)
         
-        for i in range(0, len(sig_list), 500):
-            batch = sig_list[i:i+500]
-            conditions = []
-            params = {}
-            for idx, (phone, name, addr, city) in enumerate(batch):
-                conditions.append(f"(phone_number = :p{idx} AND LOWER(TRIM(name)) = :n{idx} AND LOWER(TRIM(COALESCE(address,''))) = :a{idx} AND LOWER(TRIM(COALESCE(city,''))) = :c{idx})")
-                params[f"p{idx}"] = phone
-                params[f"n{idx}"] = name
-                params[f"a{idx}"] = addr
-                params[f"c{idx}"] = city
-            
-            if not conditions:
-                continue
-                
-            query = f"""SELECT LOWER(TRIM(name)) as n, phone_number as p, 
-                              LOWER(TRIM(COALESCE(address,''))) as a, 
-                              LOWER(TRIM(COALESCE(city,''))) as ct
-                       FROM raw_clean_google_map_data 
-                       WHERE {' OR '.join(conditions)}"""
+        for i in range(0, len(hash_list), 1000):
+            batch = hash_list[i:i+1000]
             try:
-                rows = conn.execute(text(query), params).fetchall()
+                # Optimized for index usage on signature_hash column
+                query = text("SELECT signature_hash FROM raw_clean_google_map_data WHERE signature_hash IN :hashes")
+                rows = conn.execute(query, {"hashes": batch}).fetchall()
                 for r in rows:
-                    results.add((str(r[1]), str(r[0]), str(r[2]), str(r[3])))
+                    results.add(str(r[0]))
             except Exception as e:
-                logger.warning(f"Duplicate check sub-batch failed (non-fatal): {e}")
+                logger.warning(f"Duplicate hash check failed (non-fatal): {e}")
         return results
 
     def start_pipeline(self):
@@ -555,8 +556,10 @@ class ValidationQualityProcessor:
                             batch_rows.append(norm_row)
                             current_max_id = max(current_max_id, norm_row['id'])
                             
-                            sig = (norm_row['phone_number'], norm_row['name'].lower(), norm_row['address'].lower(), norm_row['city'].lower())
-                            signatures.add(sig)
+                            # Calculate Signature Hash (Fast Dedupe)
+                            sig_str = f"{norm_row['phone_number']}|{norm_row['name'].lower()}|{norm_row['address'].lower()}|{norm_row['city'].lower()}"
+                            norm_row['sig_hash'] = hashlib.md5(sig_str.encode()).hexdigest()
+                            signatures.add(norm_row['sig_hash'])
                         except Exception as row_err:
                             # Skip bad row, advance cursor past it
                             try:
@@ -578,8 +581,7 @@ class ValidationQualityProcessor:
                             
                             is_structured, is_valid, missing_list, invalid_list, clean_phone = self.validate_row(row)
                             
-                            sig = (row['phone_number'], row['name'].lower(), row['address'].lower(), row['city'].lower())
-                            is_duplicate = sig in existing_sigs if is_structured else False
+                            is_duplicate = row['sig_hash'] in existing_sigs if is_structured else False
 
                             status = "VALID"
                             if not is_structured: 
@@ -599,7 +601,7 @@ class ValidationQualityProcessor:
                                     created_at = datetime.now()
                                 
                                 clean_data_batch.append({
-                                    "raw_id": row['id'], "name": row['name'], "address": row['address'],
+                                    "raw_id": row['id'], "sig_hash": row['sig_hash'], "name": row['name'], "address": row['address'],
                                     "website": row['website'], "phone": row['phone_number'], 
                                     "reviews": self.safe_int(row.get('reviews_count', 0)),
                                     "avg": self.safe_float(row.get('reviews_average', 0.00)),
@@ -609,7 +611,7 @@ class ValidationQualityProcessor:
                                     "clean_status": "CLEANED" if status == "VALID" else "FAILED_VALIDATION" if status != "DUPLICATE" else "DUPLICATE_FOUND", 
                                     "missing": ",".join(missing_list) if missing_list else None, 
                                     "invalid": ",".join(invalid_list) if invalid_list else None, 
-                                    "duplicate_reason": "Exact match (Phone, Name, Address, City)" if status == "DUPLICATE" else None, 
+                                    "duplicate_reason": "Exact match detected via signature hash" if status == "DUPLICATE" else None, 
                                     "processed_at": datetime.now()
                                 })
                                 
@@ -638,10 +640,10 @@ class ValidationQualityProcessor:
                         try:
                             conn.execute(text("""
                                 INSERT IGNORE INTO raw_clean_google_map_data 
-                                (raw_id, name, address, website, phone_number, reviews_count, reviews_avg,
+                                (raw_id, signature_hash, name, address, website, phone_number, reviews_count, reviews_avg,
                                  category, subcategory, city, state, area, created_at,
                                  validation_status, cleaning_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at)
-                                VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created,
+                                VALUES (:raw_id, :sig_hash, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created,
                                         :val_status, :clean_status, :missing, :invalid, :duplicate_reason, :processed_at)
                             """), clean_data_batch)
                         except Exception as e:

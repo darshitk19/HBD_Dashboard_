@@ -4,6 +4,10 @@ from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
 import os
 from dotenv import load_dotenv
+from model.normalizer import UniversalNormalizer
+
+# Compatibility helper
+normalize_phone = UniversalNormalizer.normalize_phone
 
 # Load environment variables
 load_dotenv('.env') 
@@ -15,6 +19,34 @@ DB_NAME = os.getenv('DB_NAME')
 
 DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}"
 engine = create_engine(DATABASE_URI)
+
+# --- NORMALIZATION SETTINGS --- #
+
+INDIAN_STATES = [
+    # 28 States
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", 
+    "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", 
+    "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", 
+    "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", 
+    "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", 
+    "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    # 8 Union Territories
+    "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu",
+    "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry",
+    # Common Aliases
+    "Pondicherry"
+]
+
+def normalize_city_state(city, state):
+    """Detects if city ends with a state name and normalizes it."""
+    city_str = str(city or "").strip()
+    state_str = str(state or "").strip()
+    
+    if state_str.lower() == 'unknown' and city_str:
+        for s in INDIAN_STATES:
+            if city_str.endswith(f" {s}"):
+                return city_str[:-len(s)].strip(), s
+    return city, state
 
 # ---------------- VALIDATORS ---------------- #
 
@@ -31,11 +63,16 @@ def check_mandatory(row):
 def validate_formats(row):
     invalid_fields = []
     
-    # Phone: 10-15 digits
-    phone = re.sub(r'\D', '', str(row.get('phone_number', '')))
+    # Phone: 10-15 digits after normalization (strips 0/91)
+    phone = normalize_phone(row.get('phone_number', ''))
     if not (10 <= len(phone) <= 15):
         invalid_fields.append("phone_number")
         
+    # Address: Must NOT be purely numerical (e.g., "12345678" is junk)
+    address = str(row.get('address', '')).strip()
+    if address and address.isdigit():
+        invalid_fields.append("address")
+
     # Website: Force https (if present)
     website = str(row.get('website', '')).lower().strip()
     if website and not (website.startswith('http://') or website.startswith('https://')):
@@ -88,40 +125,56 @@ def run_validation():
         invalid_format_fields = []
         duplicate_reason = None
         
-        # 1. Mandatory Fields
-        missing = check_mandatory(row)
+        # 1. Normalize City/State immediately (Moves state name from city if found)
+        # This ensures validation and deduplication work on correct data
+        clean_city, clean_state = normalize_city_state(row['city'], row['state'])
+        
+        # 2. Mandatory Fields
+        # We use the normalized values for checking
+        validation_row = row.copy()
+        validation_row['city'] = clean_city
+        validation_row['state'] = clean_state
+        
+        missing = check_mandatory(validation_row)
         if missing:
             validation_status = "UNSTRUCTURED"
             missing_fields = missing
         
-        # 2. Format Validation
+        # 3. Format Validation (Blocks numerical addresses, etc.)
         if validation_status == "STRUCTURED":
-            invalid = validate_formats(row)
+            invalid = validate_formats(validation_row)
             if invalid:
                 validation_status = "INVALID"
                 invalid_format_fields = invalid
         
-        # 3. Duplicate Detection (check against clean table)
+        # 4. Duplicate Detection (check against master/clean table)
         if validation_status == "STRUCTURED":
-            # Simple check for now: name + address + phone
+            # Check against the composite index: name + phone_number + city + address
             check_query = text("""
                 SELECT id FROM raw_clean_google_map_data 
-                WHERE name = :name AND address = :address AND phone_number = :phone LIMIT 1
+                WHERE name = :name 
+                  AND phone_number = :phone 
+                  AND city = :city 
+                  AND address = :address 
+                LIMIT 1
             """)
             with engine.connect() as conn:
                 dup = conn.execute(check_query, {
-                    "name": row['name'], 
-                    "address": row['address'], 
-                    "phone": row['phone_number']
+                    "name": validation_row['name'], 
+                    "address": validation_row['address'], 
+                    "phone": validation_row['phone_number'],
+                    "city": validation_row['city']
                 }).fetchone()
                 if dup:
                     validation_status = "DUPLICATE"
-                    duplicate_reason = "Exact match in clean data"
+                    duplicate_reason = "Composite match in clean data"
 
-        # Update the validation record
+        # Update the validation record with FIXED city/state and status
         update_query = text("""
             UPDATE validation_raw_google_map 
-            SET validation_status = :status,
+            SET city = :city,
+                state = :state,
+                validation_status = :status,
                 missing_fields = :missing,
                 invalid_format_fields = :invalid,
                 duplicate_reason = :dup_reason,
@@ -130,6 +183,8 @@ def run_validation():
         """)
         with engine.begin() as conn:
             conn.execute(update_query, {
+                "city": validation_row['city'],
+                "state": validation_row['state'],
                 "status": validation_status,
                 "missing": ",".join(missing_fields) if missing_fields else None,
                 "invalid": ",".join(invalid_format_fields) if invalid_format_fields else None,
@@ -153,12 +208,13 @@ def run_cleaning():
         
     for index, row in df.iterrows():
         # Clean data in memory
+        # Note: City and State were already normalized during the validation phase
         clean_row = {
             "raw_id": row['raw_id'],
             "name": str(row['name']).strip(),
             "address": str(row['address']).strip(),
             "website": str(row['website']).lower().strip() if row['website'] else None,
-            "phone_number": re.sub(r'\D', '', str(row['phone_number'])),
+            "phone_number": normalize_phone(row['phone_number']),
             "reviews_count": row['reviews_count'],
             "reviews_avg": row['reviews_avg'],
             "category": row['category'],

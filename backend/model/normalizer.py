@@ -61,6 +61,18 @@ STATE_MAP = {
     "kerla": "Kerala",
 }
 
+# Comprehensive list for extraction logic
+INDIAN_STATES_FULL = [
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", 
+    "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", 
+    "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", 
+    "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", 
+    "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", 
+    "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu",
+    "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry", "Pondicherry"
+]
+
 
 class UniversalNormalizer:
     """
@@ -92,8 +104,8 @@ class UniversalNormalizer:
         if not val or not isinstance(val, str):
             return ""
         cleaned = str(val).strip()
-        if cleaned.lower() in ('nan', 'none', 'nat', ''):
-            return ""
+        if cleaned.lower() in ('nan', 'none', 'nat', '', 'unknown'):
+            return "unknown"
         # Try English abbreviation lookup (lowercase, no spaces)
         lookup_key = re.sub(r'[^a-z0-9]', '', cleaned.lower())
         if lookup_key in STATE_MAP:
@@ -102,11 +114,45 @@ class UniversalNormalizer:
         return cleaned.strip()
 
     @staticmethod
+    def extract_state_from_city(city, state):
+        """Helper to move state name from city column if state is unknown."""
+        c = str(city or "").strip()
+        s = str(state or "").strip()
+        
+        if s.lower() in ('unknown', '') and c:
+            for st in INDIAN_STATES_FULL:
+                if c.endswith(f" {st}"):
+                    detected = st
+                    if detected == 'Pondicherry': detected = 'Puducherry'
+                    return c[:-len(st)].strip(), detected
+        return c, s
+
+    @staticmethod
+    def is_numerical_address(val):
+        """Checks if the address is purely numerical junk."""
+        addr = str(val or "").strip()
+        if not addr: return False
+        # Remove spaces/dashes to check if only digits remain
+        stripped = re.sub(r'[\s\-]', '', addr)
+        return stripped.isdigit() and len(stripped) > 3
+
+    @staticmethod
     def normalize_phone(val):
-        """Extract digits only from phone number."""
+        """Extract digits only and normalize (strip 0/91 prefix for Indian numbers)."""
         if not val:
             return ""
-        return re.sub(r'\D', '', str(val))
+        # 1. Extract digits only
+        s = re.sub(r'\D', '', str(val))
+        
+        # 2. Aggressive Indian normalization
+        # Remove all leading zeros first (handles 07085485781 -> 7085485781)
+        s = s.lstrip('0')
+        
+        # If it starts with 91 and is 12 digits, strip 91 (handles 917085485781 -> 7085485781)
+        if len(s) == 12 and s.startswith('91'):
+            s = s[2:]
+            
+        return s
 
     @staticmethod
     def normalize_website(val):
@@ -194,8 +240,14 @@ class UniversalNormalizer:
     @classmethod
     def normalize_row_raw(cls, row):
         """Tier 1: Minimal normalization for raw storage. Only trims whitespace."""
+        raw_city = cls.get_fuzzy(row, "city")
+        raw_state = cls.get_fuzzy(row, "state")
+        
+        # Better extraction even at Tier 1 (Raw) level
+        clean_city, clean_state = cls.extract_state_from_city(raw_city, raw_state)
+        
         return {
-            "name": cls.get_fuzzy(row, "name"),
+            "name": cls.clean_text(cls.get_fuzzy(row, "name")), # Preserve original text but trim
             "address": cls.get_fuzzy(row, "address"),
             "website": cls.get_fuzzy(row, "website"),
             "phone_number": cls.get_fuzzy(row, "phone_number"),
@@ -203,8 +255,8 @@ class UniversalNormalizer:
             "reviews_average": cls.normalize_float(cls.get_fuzzy(row, "reviews_average")),
             "category": cls.get_fuzzy(row, "category"),
             "subcategory": cls.get_fuzzy(row, "subcategory"),
-            "city": cls.get_fuzzy(row, "city"),
-            "state": cls.get_fuzzy(row, "state"),
+            "city": clean_city,
+            "state": clean_state,
             "area": row.get("area"),
             "drive_folder_id": row.get("drive_folder_id"),
             "drive_folder_name": row.get("drive_folder_name"),
@@ -217,6 +269,12 @@ class UniversalNormalizer:
     @classmethod
     def normalize_row_full(cls, row):
         """Tier 2: Robust normalization for clean/master storage."""
+        raw_city = cls.get_fuzzy(row, "city")
+        raw_state = cls.get_fuzzy(row, "state")
+        
+        # Cross-column normalization: Extract state from city if state is missing
+        clean_city, clean_state = cls.extract_state_from_city(raw_city, raw_state)
+        
         return {
             "name": cls.clean_text(cls.get_fuzzy(row, "name")),
             "address": cls.clean_text(cls.get_fuzzy(row, "address")),
@@ -226,8 +284,8 @@ class UniversalNormalizer:
             "reviews_average": cls.normalize_float(cls.get_fuzzy(row, "reviews_average")),
             "category": cls.normalize_category(cls.get_fuzzy(row, "category")),
             "subcategory": cls.clean_text(cls.get_fuzzy(row, "subcategory")),
-            "city": cls.clean_text(cls.get_fuzzy(row, "city")),
-            "state": cls.normalize_state(cls.get_fuzzy(row, "state")),
+            "city": cls.clean_text(clean_city),
+            "state": cls.normalize_state(clean_state),
             "area": cls.clean_text(row.get("area")),
             "drive_folder_id": row.get("drive_folder_id"),
             "drive_folder_name": row.get("drive_folder_name"),

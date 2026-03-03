@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from model.normalizer import UniversalNormalizer
 
 from celery.utils.log import get_task_logger
+import redis as redis_lib
 
 logger = get_task_logger("GDrive_Celery_Task")
 
@@ -64,6 +65,16 @@ engine = create_engine(
     pool_pre_ping=True      
 )
 
+# Global Redis Pool for metrics and locks
+import redis as redis_lib
+redis_pool = redis_lib.ConnectionPool.from_url(
+    os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+    max_connections=10, # Reduced to avoid socket exhaustion
+    socket_timeout=10,
+    socket_connect_timeout=10
+)
+redis_client = redis_lib.Redis(connection_pool=redis_pool)
+
 # Fix 7: Graceful Shutdown
 shutdown_requested = False
 
@@ -98,9 +109,10 @@ def get_service():
 @contextmanager
 def download_csv(service, file_id, max_size_mb=None):
     """
-    STREAMS a CSV file from Google Drive row-by-row into memory.
-    NO local files, NO temp files, NO ByteIO accumulation of full file.
+    Downloads a CSV file from Google Drive into memory.
+    Note: Buffers fully into memory before yielding to the reader.
     """
+    import gevent
     request = service.files().get_media(fileId=file_id)
     
     import io
@@ -111,7 +123,20 @@ def download_csv(service, file_id, max_size_mb=None):
     
     done = False
     while not done:
-        _, done = downloader.next_chunk()
+        # Crucial: Yield control to gevent hub every chunk to handle Redis heartbeats
+        gevent.sleep(0.01)
+        
+        # Retry logic for transient SSL / Network errors during download
+        for attempt in range(5):
+            try:
+                _, done = downloader.next_chunk()
+                break
+            except Exception as e:
+                if (attempt < 4 and ("SSL" in str(e) or "EOF" in str(e) or "connection" in str(e).lower())):
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+                    continue
+                raise
     
     fh.seek(0)
     wrapper = io.TextIOWrapper(fh, encoding='utf-8', errors='replace')
@@ -128,7 +153,7 @@ def get_file_hash(file_id, modified_time):
 
 # SECTION 3: Batched Insert Optimization (with Deadlock Retry + Rate Limiting)
 
-def commit_batch(batch, task_id=None):
+def commit_batch(batch, task_id=None, **kwargs):
     """
     Inserts a BATCH of rows efficiently. 
     NO deduplication - inserts EVERYTHING as requested.
@@ -161,14 +186,31 @@ def commit_batch(batch, task_id=None):
             if val and isinstance(val, str) and len(val) > 500:
                 row[key] = val[:500]
         
+        # Calculate Row Signature for exact deduplication in Raw Table
+        # (Using all 11 business columns to only block TRUE exact copies)
+        sig_str = "|".join([
+            str(row.get('name') or "").lower().strip(),
+            str(row.get('address') or "").lower().strip(),
+            str(row.get('website') or "").lower().strip(),
+            str(row.get('phone_number') or "").lower().strip(),
+            str(row.get('reviews_count') or 0),
+            str(row.get('reviews_average') or 0.0),
+            str(row.get('category') or "").lower().strip(),
+            str(row.get('subcategory') or "").lower().strip(),
+            str(row.get('city') or "").lower().strip(),
+            str(row.get('state') or "").lower().strip(),
+            str(row.get('area') or "").lower().strip()
+        ])
+        row['row_signature'] = hashlib.md5(sig_str.encode('utf-8', errors='ignore')).hexdigest()
+        
     sql = text("""
-        INSERT INTO raw_google_map_drive_data (
+        INSERT IGNORE INTO raw_google_map_drive_data (
             name, address, website, phone_number, 
             reviews_count, reviews_average, 
             category, subcategory, city, state, area, 
             drive_file_id, drive_file_name, full_drive_path, 
             drive_uploaded_time, source,
-            etl_version, task_id, file_hash
+            etl_version, task_id, file_hash, row_signature
         )
         VALUES (
             :name, :address, :website, :phone_number, 
@@ -176,7 +218,7 @@ def commit_batch(batch, task_id=None):
             :category, :subcategory, :city, :state, :area, 
             :drive_file_id, :drive_file_name, :drive_file_path, 
             :drive_uploaded_time, 'google_drive',
-            :etl_version, :task_id, :file_hash
+            :etl_version, :task_id, :file_hash, :row_signature
         )
     """)
     
@@ -184,13 +226,20 @@ def commit_batch(batch, task_id=None):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            with engine.begin() as conn:
-                result = conn.execute(sql, batch)
-                inserted = result.rowcount
-                if inserted > 0:
-                    rows_inserted.inc(inserted)
+            # If a connection is passed, use it (transactional), else create a new one
+            inserted = len(batch)
+            if kwargs.get('conn'):
+                kwargs['conn'].execute(sql, batch)
+            else:
+                with engine.begin() as conn:
+                    result = conn.execute(sql, batch)
+                    # Use actual rowcount because IGNORE might skip duplicates
+                    inserted = result.rowcount
+
+            if inserted > 0:
+                rows_inserted.inc(inserted)
                 logger.info(f"Committed batch: {inserted} rows.")
-                return inserted
+            return inserted
         except OperationalError as e:
             err_msg = str(e)
             # Retry on deadlock or connection errors
@@ -213,9 +262,10 @@ def commit_batch(batch, task_id=None):
     return 0
 
 
-def update_file_checkpoint(file_id, filename, status, row_number=0, error_msg=None, file_hash=None):
+def update_file_checkpoint(file_id, filename, status, row_number=0, error_msg=None, file_hash=None, conn=None):
     """
     Updates file status and row checkpoint for crash-safe resumption.
+    If conn is provided, uses it (for transactional atomicity).
     """
     try:
         sql = text("""
@@ -228,15 +278,19 @@ def update_file_checkpoint(file_id, filename, status, row_number=0, error_msg=No
                 file_hash = COALESCE(VALUES(file_hash), file_hash),
                 processed_at = NOW()
         """)
-        with engine.begin() as conn:
+        if conn:
             conn.execute(sql, {
-                "file_id": file_id,
-                "filename": filename,
-                "status": status,
-                "row_num": row_number,
-                "error_msg": str(error_msg)[:2000] if error_msg else None,
+                "file_id": file_id, "filename": filename, "status": status,
+                "row_num": row_number, "error_msg": str(error_msg)[:2000] if error_msg else None,
                 "file_hash": file_hash
             })
+        else:
+            with engine.begin() as conn:
+                conn.execute(sql, {
+                    "file_id": file_id, "filename": filename, "status": status,
+                    "row_num": row_number, "error_msg": str(error_msg)[:2000] if error_msg else None,
+                    "file_hash": file_hash
+                })
     except Exception as e:
         logger.warning(f"Checkpoint update failed for {filename}: {e}")
 
@@ -314,19 +368,27 @@ def refresh_dashboard_stats():
 def trigger_stats_refresh():
     """Call this inside process_csv_task on success. Fully guarded — never throws."""
     try:
-        import redis as redis_lib
-        r = redis_lib.from_url(
-            os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-            socket_timeout=3,
-            socket_connect_timeout=3,
-            retry_on_timeout=True
-        )
-        val = r.incr("gdrive_etl_file_count")
+        val = redis_client.incr("gdrive_etl_file_count")
         if val % 50 == 0:
             refresh_dashboard_stats.delay()
     except Exception:
         # Redis down is non-fatal — just skip stats trigger silently
         pass
+
+
+@contextmanager
+def redis_lock(lock_name, timeout=3600):
+    """Simple redis-based distributed lock."""
+    lock_id = threading.get_ident()
+    # set nx=True means only set if it doesn't exist
+    acquired = redis_client.set(f"lock:{lock_name}", lock_id, ex=timeout, nx=True)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            # Only delete if we own it (simple check)
+            if redis_client.get(f"lock:{lock_name}") == str(lock_id).encode():
+                redis_client.delete(f"lock:{lock_name}")
 
 
 # SECTION 4: Main Processing Task (with all fixes applied)
@@ -352,66 +414,77 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
         
     file_hash = get_file_hash(file_id, modified_time or '')
     
-    # 1. Check for existing checkpoint (Idempotency Phase 3)
-    status, last_row = get_file_checkpoint(file_id)
-    if status == 'PROCESSED':
-        logger.info(f"Skip: {file_name} already fully processed.")
-        return f"Skipped processed file: {file_name}"
-    
     try:
-        service = get_service()
-        update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', last_row, file_hash=file_hash)
-        
-        with download_csv(service, file_id) as stream:
-            reader = csv.DictReader(stream)
-            current_row_idx = 0
-            batch = []
-            BATCH_THRESHOLD = 3000 # Memory-friendly limit
-            
-            for row in reader:
-                current_row_idx += 1
-                
-                # Resume logic: Skip rows already processed
-                if current_row_idx <= last_row:
-                    continue
+        # Use Redis Lock to prevent concurrent processing (Improves Idempotency)
+        with redis_lock(f"file_proc_{file_id}") as acquired:
+            if not acquired:
+                logger.warning(f"File {file_name} is already being processed by another worker. Skipping.")
+                return f"Locked: {file_name}"
 
-                if shutdown_requested:
+            # 1. Check for existing checkpoint (Idempotency Phase 3)
+            status, last_row = get_file_checkpoint(file_id)
+            if status == 'PROCESSED':
+                logger.info(f"Skip: {file_name} already fully processed.")
+                return f"Skipped processed file: {file_name}"
+            
+            service = get_service()
+            update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', last_row, file_hash=file_hash)
+            
+            with download_csv(service, file_id) as stream:
+                reader = csv.DictReader(stream)
+                current_row_idx = 0
+                batch = []
+                BATCH_THRESHOLD = 1000 # Reduced for smoother gevent task switching
+                
+                for row in reader:
+                    current_row_idx += 1
+                    
+                    # Yield control to gevent hub every 250 rows to handle Redis heartbeats
+                    if current_row_idx % 250 == 0:
+                        time.sleep(0.01)
+
+                    # Resume logic: Skip rows already processed
+                    if current_row_idx <= last_row:
+                        continue
+
+                    if shutdown_requested:
+                        if batch:
+                            commit_batch(batch, task_id=task_id)
+                        update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', current_row_idx-1, 
+                                              error_msg="Graceful shutdown")
+                        return f"Paused: {file_name} at row {current_row_idx-1}"
+                    
+                    # Normalize — wrapped in try/except to skip bad rows instead of crashing
+                    try:
+                        norm_row = UniversalNormalizer.normalize_row_raw({
+                            **row, "drive_file_id": file_id, "drive_file_name": file_name,
+                            "drive_folder_id": folder_id, "drive_folder_name": folder_name,
+                            "drive_file_path": path, "drive_uploaded_time": modified_time
+                        })
+                        norm_row['file_hash'] = file_hash
+                        batch.append(norm_row)
+                    except Exception as norm_err:
+                        logger.warning(f"Row {current_row_idx} normalization failed in {file_name}: {norm_err}")
+                        continue
+                    
+                    # BATCH INSERT (High Speed + Transactional Safety)
+                    if len(batch) >= BATCH_THRESHOLD:
+                        with engine.begin() as conn:
+                            commit_batch(batch, task_id=task_id, conn=conn)
+                            update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', 
+                                                  current_row_idx, file_hash=file_hash, conn=conn)
+                        batch = []
+
+                # Remaining rows — commit and mark PROCESSED in ONE TRANSACTION
+                with engine.begin() as conn:
                     if batch:
-                        commit_batch(batch, task_id=task_id)
-                    update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', current_row_idx-1, 
-                                          error_msg="Graceful shutdown")
-                    return f"Paused: {file_name} at row {current_row_idx-1}"
-                
-                # Normalize — wrapped in try/except to skip bad rows instead of crashing
-                try:
-                    norm_row = UniversalNormalizer.normalize_row_raw({
-                        **row, "drive_file_id": file_id, "drive_file_name": file_name,
-                        "drive_folder_id": folder_id, "drive_folder_name": folder_name,
-                        "drive_file_path": path, "drive_uploaded_time": modified_time
-                    })
-                    norm_row['file_hash'] = file_hash
-                    batch.append(norm_row)
-                except Exception as norm_err:
-                    logger.warning(f"Row {current_row_idx} normalization failed in {file_name}: {norm_err}")
-                    continue
-                
-                # BATCH INSERT (High Speed)
-                if len(batch) >= BATCH_THRESHOLD:
-                    commit_batch(batch, task_id=task_id)
-                    update_file_checkpoint(file_id, file_name, 'IN_PROGRESS', current_row_idx, file_hash=file_hash)
-                    batch = []
+                        commit_batch(batch, task_id=task_id, conn=conn)
+                    update_file_checkpoint(file_id, file_name, 'PROCESSED', current_row_idx, file_hash=file_hash, conn=conn)
 
-            # Remaining rows
-            if batch:
-                commit_batch(batch, task_id=task_id)
-            
-            # Final success state
-            update_file_checkpoint(file_id, file_name, 'PROCESSED', current_row_idx, file_hash=file_hash)
-
-        processing_time.observe(time.time() - start_time)
-        files_processed.inc()
-        trigger_stats_refresh()
-        return f"Completed {file_name}: {current_row_idx} rows"
+            processing_time.observe(time.time() - start_time)
+            files_processed.inc()
+            trigger_stats_refresh()
+            return f"Completed {file_name}: {current_row_idx} rows"
 
     except Exception as e:
         err_msg = str(e)

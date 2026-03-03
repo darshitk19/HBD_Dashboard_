@@ -200,13 +200,25 @@ if __name__ == '__main__':
             app.config['SQLALCHEMY_DATABASE_URI'],
             pool_size=1, max_overflow=0, pool_pre_ping=True, pool_recycle=1800
         )
+        import redis
+        r = redis.Redis(host='localhost', port=6379, db=0)
+        
         while True:
             try:
                 with monitor_engine.connect() as conn:
                     raw = conn.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).fetchone()[0]
                     clean = conn.execute(text("SELECT COUNT(*) FROM raw_clean_google_map_data")).fetchone()[0]
                     master = conn.execute(text("SELECT COUNT(*) FROM g_map_master_table")).fetchone()[0]
-                    msg = f"\n{'='*60}\n  [LIVE STATUS]  Raw: {raw:,}  |  Clean: {clean:,}  |  Master: {master:,}\n{'='*60}\n"
+                    
+                    # Check Celery Queue length
+                    try:
+                        queue_len = r.llen('celery')
+                    except Exception:
+                        queue_len = 0
+                    
+                    drive_status = "✅ DONE/IDLE" if queue_len == 0 else f"📂 BUSY ({queue_len} files queued)"
+                    
+                    msg = f"\n{'='*60}\n  [LIVE STATUS]  Raw: {raw:,}  |  Clean: {clean:,}  |  Master: {master:,}\n  Drive Status: {drive_status}\n{'='*60}\n"
                     sys.stderr.write(msg)
                     sys.stderr.flush()
             except Exception as e:
